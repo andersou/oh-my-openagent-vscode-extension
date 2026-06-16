@@ -2,14 +2,22 @@
 
 A VS Code companion extension for Oh My OpenAgent. It gives you a visual tree of agents, categories, and profiles, and a form-based editor for model overrides without hand-editing JSONC files.
 
+## Screenshots
+
+The sidebar view shows your active config, all built-in agents and categories with their assigned models, and saved profiles. The editor panel opens on demand for any agent or category — it supports model selection, sampling parameters, thinking budgets, and fallback models.
+
+| Sidebar overview | Agent editor in action |
+|:---:|:---:|
+| ![Sidebar showing agents, categories, and profiles tree](img/sidebar-overview.png) | ![Agent editor webview with model, sampling, and thinking fields](img/editor-agent-sisyphus.png) |
+
 ## Features
 
-- **Agent and category model overrides** — see every built-in agent and category, add empty override slots, and edit them in a webview form.
-- **Lazy model picker** — the Model field is populated asynchronously from the local `opencode models` CLI, with a free-form fallback when the CLI is unavailable.
-- **JSONC preservation** — all writes go through `jsonc-parser`, so comments, trailing commas, and formatting in your config file stay intact.
-- **Profiles** — snapshot the current `agents` and `categories` sections, switch between them instantly, and keep an optional description for each.
-- **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away.
-- **Command palette support** — every action is also available from the Command Palette.
+- **Agent and category model overrides** — see all 11 built-in agents and 8 built-in categories in a hierarchical tree. Add empty override slots with one click, then edit them in the webview form. The tree renders labels like `sisyphus → opencode-go/kimi-k2.7-code` so you always know which model is assigned.
+- **Lazy model picker** — the Model field is populated asynchronously from the local `opencode models --verbose` CLI, with a free-form fallback when the CLI is unavailable. The discovered model IDs appear as autocomplete suggestions alongside each model's capabilities and variants. A reload button lets you re-run discovery at any time.
+- **JSONC preservation** — all writes go through `jsonc-parser` via a per-path diff engine. The `ConfigStore` compares the original and modified config recursively, then calls `modify()` on each changed JSON path individually. Comments, trailing commas, and formatting on untouched keys survive every edit.
+- **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`oh-my-openagent.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
+- **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away. Three collapsible groups (Agents, Categories, Profiles) with inline edit buttons, context menu actions, and tooltips that show configured parameters on hover.
+- **Command palette support** — all 12 extension commands are available from the Command Palette, including override management and profile CRUD.
 
 ## Requirements
 
@@ -142,6 +150,41 @@ Activation preserves comments and trailing commas in the active config because i
 - **Duplicate** creates a deep copy under a new name; the original is unchanged.
 - **Delete** asks for confirmation and removes the profile. If it was the active profile, the active marker is cleared.
 
+## Architecture
+
+The extension follows a clean layered architecture with strict separation of concerns:
+
+```
+extension.ts  (activation orchestrator)
+     |
+     ├── commands.ts  (12 command handlers)
+     |
+     ├── ui/
+     │   ├── agentModelTreeProvider.ts  (sidebar TreeDataProvider)
+     │   └── agentEditorPanel.ts  (webview panel singleton)
+     │
+     └── config/
+         ├── schema.ts  (TypeScript types for OmO config)
+         ├── configStore.ts  (JSONC read/write, file watching)
+         └── profileStore.ts  (profile CRUD, activation)
+```
+
+### Key design decisions
+
+- **ConfigStore is pure Node.js** — zero VS Code dependency, making it testable in isolation with vitest. File watching uses `fs.watch` with 150 ms debounce and a `suppressWatch` flag to ignore self-triggered events during atomic writes.
+- **Atomic writes everywhere** — both `ConfigStore` and `ProfileStore` write via temp-file + `fs.renameSync`, guaranteeing no partial content even on crash.
+- **Per-path JSONC diffing** — `updateConfig()` deep-clones the parsed config, runs the updater callback, then `diffConfigs()` recursively compares original and draft. Each changed JSON path gets its own `jsonc-parser` `modify()` call, so comments and formatting on untouched keys are never disturbed.
+- **Webview security** — strict CSP with `default-src 'none'`, per-render nonces via `crypto.randomBytes(16)`, local resource roots restricted to `out/` only, and all DOM text insertion uses `.textContent` (never `innerHTML`).
+- **Singleton editor panel** — `AgentEditorPanel` uses a static `currentPanel` reference to prevent multiple webview instances. Panel state survives tab switches via `retainContextWhenHidden: true`.
+- **Sidecar profiles** — profiles are stored in a separate plain JSON file (`oh-my-openagent.profiles.json`) so the main OmO config stays schema-clean. Profile activation writes into the main config through the JSONC-preserving `ConfigStore.updateConfig()` path.
+
+### Built-in inventory
+
+| Domain | Items |
+|--------|-------|
+| Agents | `sisyphus`, `hephaestus`, `prometheus`, `oracle`, `librarian`, `explore`, `multimodal-looker`, `metis`, `momus`, `atlas`, `sisyphus-junior` (11 total) |
+| Categories | `visual-engineering`, `ultrabrain`, `deep`, `artistry`, `quick`, `unspecified-low`, `unspecified-high`, `writing` (8 total) |
+
 ## Development
 
 This extension is built with TypeScript and esbuild.
@@ -169,7 +212,15 @@ To run the extension locally, press `F5` in VS Code. This opens the Extension De
 
 ### Tests
 
-Tests are written with Vitest and cover config parsing, JSONC-preserving updates, profile lifecycle, tree-provider rendering, the model-discovery service, and a happy-dom-based webview integration test for the lazy model picker.
+Tests are written with Vitest and currently run **59 tests across 3 test suites**:
+
+| Suite | Tests | What it covers |
+|-------|-------|----------------|
+| `configStore.test.ts` | 11 | Config discovery, JSONC parsing, formatting-preserving updates, key removal, file watching |
+| `profileStore.test.ts` | 34 | Profile CRUD, rename, duplicate, deep-clone isolation, activation with JSONC preservation, change events |
+| `agentModelTreeProvider.test.ts` | 14 | Tree group structure, context-value mapping, override detection, active profile indicator, refresh, dispose |
+
+The JSONC preservation tests verify that comments, trailing commas, and formatting survive round-trips through `updateConfig()` and profile activation — confirmed against real config fixtures with inline comments and trailing commas.
 
 ```bash
 npm test
