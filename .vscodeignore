@@ -1,0 +1,33 @@
+node_modules/**
+dist/**
+.vscode/**
+.omo/**
+**/*.map
+**/*.tsbuildinfo
+.eslintrc*
+.prettierrc*
+tsconfig.json
+tsconfig.*.json
+*.log
+.DS_Store
+coverage/**
+**/.vitest-cache/**
+**/__snapshots__/**
+src/**/*.test.ts
+src/**/__tests__/**
+
+# Compiled extension host + webview bundles live in `out/` (built by
+# esbuild) and MUST be packaged — the extension's `main` entry is
+# `./out/extension.js` and the editor webview loads `./out/webview.js` via
+# `asWebviewUri`. The blanket `out/**` exclusion was an over-eager leftover
+# from the bootstrap; intentionally NOT re-added here.
+
+# Webview HTML + CSS are runtime assets read directly from disk by
+# `AgentEditorPanel._renderHtml()` (see src/ui/agentEditorPanel.ts). They
+# are NOT bundled — they ship as-is from `src/ui/webview/`. The negation
+# patterns below are defensive: the only `src/**` exclusions above target
+# test files and `__tests__/` directories, so these files are already
+# included. The negations guard against a future maintainer adding a broad
+# `src/**` rule that would silently break the webview at runtime.
+!src/ui/webview/webview.html
+!src/ui/webview/webview.css

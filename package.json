@@ -1,0 +1,182 @@
+{
+  "name": "oh-my-openagent-vscode",
+  "displayName": "Oh My OpenAgent",
+  "description": "Manage and override Oh My OpenAgent models, agents, and categories from VS Code.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "publisher": "oh-my-openagent",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:ohMyOpenAgent.openAgentManager",
+    "onView:ohMyOpenAgent.models"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ohMyOpenAgentPanel",
+          "title": "Oh My OpenAgent",
+          "icon": "$(robot)"
+        }
+      ]
+    },
+    "views": {
+      "ohMyOpenAgentPanel": [
+        {
+          "id": "ohMyOpenAgent.models",
+          "name": "Models",
+          "contextualTitle": "Oh My OpenAgent Models"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ohMyOpenAgent.openAgentManager",
+        "title": "Open Agent Manager",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.editAgent",
+        "title": "Edit Agent",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.editCategory",
+        "title": "Edit Category",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.refresh",
+        "title": "Refresh",
+        "category": "Oh My OpenAgent",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ohMyOpenAgent.addAgentOverride",
+        "title": "Add Agent Override",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.addCategoryOverride",
+        "title": "Add Category Override",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.removeOverride",
+        "title": "Remove Override",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.createProfile",
+        "title": "Create Profile",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.activateProfile",
+        "title": "Activate Profile",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.renameProfile",
+        "title": "Rename Profile",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.duplicateProfile",
+        "title": "Duplicate Profile",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.deleteProfile",
+        "title": "Delete Profile",
+        "category": "Oh My OpenAgent"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "ohMyOpenAgent.editAgent",
+          "when": "view == ohMyOpenAgent.models && viewItem == agent",
+          "group": "inline"
+        },
+        {
+          "command": "ohMyOpenAgent.editCategory",
+          "when": "view == ohMyOpenAgent.models && viewItem == category",
+          "group": "inline"
+        },
+        {
+          "command": "ohMyOpenAgent.addAgentOverride",
+          "when": "view == ohMyOpenAgent.models && viewItem == agent",
+          "group": "override"
+        },
+        {
+          "command": "ohMyOpenAgent.addCategoryOverride",
+          "when": "view == ohMyOpenAgent.models && viewItem == category",
+          "group": "override"
+        },
+        {
+          "command": "ohMyOpenAgent.removeOverride",
+          "when": "view == ohMyOpenAgent.models && viewItem == override",
+          "group": "override"
+        },
+        {
+          "command": "ohMyOpenAgent.activateProfile",
+          "when": "view == ohMyOpenAgent.models && viewItem == profile",
+          "group": "profile"
+        },
+        {
+          "command": "ohMyOpenAgent.renameProfile",
+          "when": "view == ohMyOpenAgent.models && viewItem == profile",
+          "group": "profile"
+        },
+        {
+          "command": "ohMyOpenAgent.duplicateProfile",
+          "when": "view == ohMyOpenAgent.models && viewItem == profile",
+          "group": "profile"
+        },
+        {
+          "command": "ohMyOpenAgent.deleteProfile",
+          "when": "view == ohMyOpenAgent.models && viewItem == profile",
+          "group": "profile"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "ohMyOpenAgent.refresh",
+          "when": "view == ohMyOpenAgent.models",
+          "group": "navigation"
+        },
+        {
+          "command": "ohMyOpenAgent.createProfile",
+          "when": "view == ohMyOpenAgent.models",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.4.5",
+    "vsce": "^2.15.0",
+    "vitest": "^1.6.0"
+  }
+}

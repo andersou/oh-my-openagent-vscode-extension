@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}'; font-src {{cspSource}} data:; img-src {{cspSource}} data:;"
+  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Oh My OpenAgent — Editor</title>
+  <style nonce="{{nonce}}">{{webviewCss}}</style>
+</head>
+<body>
+  <main class="editor" id="editor" aria-busy="true">
+    <header class="editor__header">
+      <p class="editor__eyebrow" id="eyebrow" hidden>Oh My OpenAgent</p>
+      <h1 class="editor__title" id="title">Edit</h1>
+      <p class="editor__subtitle" id="subtitle" hidden></p>
+    </header>
+
+    <form id="editor-form" class="editor__form" novalidate autocomplete="off">
+      <!-- Model section -->
+      <section class="editor__section" data-section="model">
+        <header class="editor__section-header">
+          <h2 class="editor__section-title">Model</h2>
+          <p class="editor__section-desc">Override the default model and tuning tier.</p>
+        </header>
+
+        <div class="field">
+          <label class="field__label" for="f-model">Model</label>
+          <input
+            class="field__input field__input--mono"
+            type="text"
+            id="f-model"
+            name="model"
+            placeholder="provider/model-name"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+          />
+          <p class="field__hint">Provider-qualified model identifier, e.g. <code>anthropic/claude-sonnet-4</code></p>
+        </div>
+
+        <div class="field-grid">
+          <div class="field">
+            <label class="field__label" for="f-variant">Variant</label>
+            <select class="field__input" id="f-variant" name="variant">
+              <option value="">(default)</option>
+              <option value="max">max</option>
+              <option value="xhigh">xhigh</option>
+              <option value="high">high</option>
+              <option value="medium">medium</option>
+              <option value="low">low</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="f-reasoning">Reasoning effort</label>
+            <select class="field__input" id="f-reasoning" name="reasoningEffort">
+              <option value="">(default)</option>
+              <option value="none">none</option>
+              <option value="minimal">minimal</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="xhigh">xhigh</option>
+              <option value="max">max</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sampling section -->
+      <section class="editor__section" data-section="sampling">
+        <header class="editor__section-header">
+          <h2 class="editor__section-title">Sampling</h2>
+          <p class="editor__section-desc">Generation parameters applied per request.</p>
+        </header>
+
+        <div class="field-grid field-grid--three">
+          <div class="field">
+            <label class="field__label" for="f-temperature">Temperature</label>
+            <input
+              class="field__input"
+              type="number"
+              id="f-temperature"
+              name="temperature"
+              step="0.1"
+              min="0"
+              max="2"
+              inputmode="decimal"
+              placeholder="0.0 – 2.0"
+            />
+            <p class="field__error" id="f-temperature-error" role="alert" hidden></p>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="f-top-p">Top-p</label>
+            <input
+              class="field__input"
+              type="number"
+              id="f-top-p"
+              name="top_p"
+              step="0.05"
+              min="0"
+              max="1"
+              inputmode="decimal"
+              placeholder="0.0 – 1.0"
+            />
+            <p class="field__error" id="f-top-p-error" role="alert" hidden></p>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="f-max-tokens">Max tokens</label>
+            <input
+              class="field__input"
+              type="number"
+              id="f-max-tokens"
+              name="maxTokens"
+              step="1"
+              min="1"
+              inputmode="numeric"
+              placeholder="e.g. 4096"
+            />
+            <p class="field__error" id="f-max-tokens-error" role="alert" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Thinking section -->
+      <section class="editor__section" data-section="thinking">
+        <header class="editor__section-header">
+          <h2 class="editor__section-title">Thinking</h2>
+          <p class="editor__section-desc">Extended reasoning budget for models that support it.</p>
+        </header>
+
+        <div class="field field--checkbox">
+          <input class="field__checkbox" type="checkbox" id="f-thinking-enabled" name="thinkingEnabled" />
+          <label class="field__label field__label--inline" for="f-thinking-enabled">Enable extended thinking</label>
+        </div>
+
+        <div class="field field--nested" id="f-budget-field" hidden>
+          <label class="field__label" for="f-budget-tokens">Budget tokens</label>
+          <input
+            class="field__input"
+            type="number"
+            id="f-budget-tokens"
+            name="budgetTokens"
+            step="1"
+            min="1"
+            inputmode="numeric"
+            placeholder="e.g. 8192"
+          />
+          <p class="field__hint">Token budget reserved for chain-of-thought reasoning.</p>
+          <p class="field__error" id="f-budget-tokens-error" role="alert" hidden></p>
+        </div>
+      </section>
+
+      <!-- Fallback section -->
+      <section class="editor__section" data-section="fallback">
+        <header class="editor__section-header">
+          <h2 class="editor__section-title">Fallback models</h2>
+          <p class="editor__section-desc">Tried in order when the primary model is unavailable.</p>
+        </header>
+
+        <div class="field">
+          <label class="field__label" for="f-fallback">Models</label>
+          <textarea
+            class="field__input field__input--textarea field__input--mono"
+            id="f-fallback"
+            name="fallbackModels"
+            rows="4"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+            placeholder="One model identifier per line, e.g.&#10;anthropic/claude-haiku&#10;openai/gpt-4o-mini"
+          ></textarea>
+          <p class="field__hint">Empty lines are ignored.</p>
+        </div>
+      </section>
+
+      <!-- Status banner (validation summary / save confirmation) -->
+      <div
+        class="editor__status"
+        id="status"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+
+      <!-- Action buttons -->
+      <div class="editor__actions">
+        <button
+          type="button"
+          class="vscode-button vscode-button--secondary"
+          id="btn-create-profile"
+          disabled
+        >Create Profile</button>
+        <button
+          type="button"
+          class="vscode-button vscode-button--primary"
+          id="btn-save"
+          disabled
+        >Save</button>
+      </div>
+    </form>
+  </main>
+
+  <script nonce="{{nonce}}" src="{{webviewJsUri}}"></script>
+</body>
+</html>
