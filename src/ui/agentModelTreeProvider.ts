@@ -20,7 +20,10 @@ export type AgentModelItemKind =
   | 'agent'
   | 'category'
   | 'override'
-  | 'profile';
+  | 'profile'
+  | 'detail'
+  | 'fallbackGroup'
+  | 'fallback';
 
 /**
  * Extends `vscode.TreeItem` with a `kind` discriminator, the top-level
@@ -37,6 +40,7 @@ export interface AgentModelTreeItem extends vscode.TreeItem {
   group?: AgentModelGroupKind;
   /** Stable identifier for the underlying config / profile entry. */
   nodeName?: string;
+  children?: AgentModelTreeItem[];
 }
 
 /** Transient preview of a model override shown before the user saves. */
@@ -190,6 +194,9 @@ export class AgentModelTreeProvider
       ];
     }
     if (element.kind !== 'group') {
+      if (element.children) {
+        return element.children;
+      }
       return [];
     }
     switch (element.group) {
@@ -226,6 +233,7 @@ export class AgentModelTreeProvider
     const hasOverride = override !== undefined;
     const preview = this.previews.get(`agents:${name}`);
     const effectiveModel = preview?.model ?? override?.model;
+    const children = this.createConfigChildren('agents', name, override);
     return this.createLeaf({
       group: 'agents',
       kind: hasOverride ? 'override' : 'agent',
@@ -234,6 +242,7 @@ export class AgentModelTreeProvider
       contextValue: hasOverride ? 'agentOverride' : 'agent',
       icon: hasOverride ? 'edit' : 'person',
       tooltip: this.formatTooltip(name, effectiveModel, override),
+      children,
     });
   }
 
@@ -242,6 +251,7 @@ export class AgentModelTreeProvider
     const hasOverride = override !== undefined;
     const preview = this.previews.get(`categories:${name}`);
     const effectiveModel = preview?.model ?? override?.model;
+    const children = this.createConfigChildren('categories', name, override);
     return this.createLeaf({
       group: 'categories',
       kind: hasOverride ? 'override' : 'category',
@@ -250,6 +260,7 @@ export class AgentModelTreeProvider
       contextValue: hasOverride ? 'categoryOverride' : 'category',
       icon: hasOverride ? 'edit' : 'tag',
       tooltip: this.formatTooltip(name, effectiveModel, override),
+      children,
     });
   }
 
@@ -282,10 +293,13 @@ export class AgentModelTreeProvider
     contextValue: 'agent' | 'category' | 'agentOverride' | 'categoryOverride';
     icon: string;
     tooltip: string;
+    children: AgentModelTreeItem[];
   }): AgentModelTreeItem {
     const item = new vscode.TreeItem(
       args.label,
-      vscode.TreeItemCollapsibleState.None,
+      args.children.length > 0
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
     ) as AgentModelTreeItem;
     item.kind = args.kind;
     item.group = args.group;
@@ -294,7 +308,134 @@ export class AgentModelTreeProvider
     item.contextValue = args.contextValue;
     item.iconPath = new vscode.ThemeIcon(args.icon);
     item.tooltip = args.tooltip;
+    item.children = args.children;
     return item;
+  }
+
+  private createConfigChildren(
+    group: Exclude<AgentModelGroupKind, 'profiles'>,
+    name: string,
+    override: AgentConfig | CategoryConfig | undefined,
+  ): AgentModelTreeItem[] {
+    if (!override) return [];
+    const children: AgentModelTreeItem[] = [];
+    if (override.variant !== undefined) {
+      children.push(this.createDetailChild(group, name, 'variant', override.variant));
+    }
+    if (override.reasoningEffort !== undefined) {
+      children.push(this.createDetailChild(group, name, 'reasoning', override.reasoningEffort));
+    }
+    if (override.temperature !== undefined) {
+      children.push(this.createDetailChild(group, name, 'temperature', String(override.temperature)));
+    }
+    if (override.top_p !== undefined) {
+      children.push(this.createDetailChild(group, name, 'top_p', String(override.top_p)));
+    }
+    if (override.maxTokens !== undefined) {
+      children.push(this.createDetailChild(group, name, 'maxTokens', String(override.maxTokens)));
+    }
+    if (override.thinking !== undefined) {
+      const value = override.thinking.type === 'enabled'
+        ? override.thinking.budgetTokens !== undefined
+          ? `enabled, budget ${override.thinking.budgetTokens}`
+          : 'enabled'
+        : 'disabled';
+      children.push(this.createDetailChild(group, name, 'thinking', value));
+    }
+    if (override.textVerbosity !== undefined) {
+      children.push(this.createDetailChild(group, name, 'verbosity', override.textVerbosity));
+    }
+    if (override.disable === true) {
+      children.push(this.createDetailChild(group, name, 'disabled', 'true'));
+    }
+    if (override.fallback_models !== undefined) {
+      const fallbackChildren = this.createFallbackChildren(group, name, override.fallback_models);
+      if (fallbackChildren.length > 0) {
+        children.push(this.createFallbackGroup(group, name, fallbackChildren));
+      }
+    }
+    return children;
+  }
+
+  private createDetailChild(
+    group: Exclude<AgentModelGroupKind, 'profiles'>,
+    name: string,
+    key: string,
+    value: string,
+  ): AgentModelTreeItem {
+    const item = new vscode.TreeItem(
+      `${key}: ${value}`,
+      vscode.TreeItemCollapsibleState.None,
+    ) as AgentModelTreeItem;
+    item.kind = 'detail';
+    item.group = group;
+    item.nodeName = name;
+    item.id = `${group}:${name}:detail:${key}`;
+    item.contextValue = 'detail';
+    item.iconPath = new vscode.ThemeIcon('settings-gear');
+    item.tooltip = `${key}: ${value}`;
+    return item;
+  }
+
+  private createFallbackGroup(
+    group: Exclude<AgentModelGroupKind, 'profiles'>,
+    name: string,
+    children: AgentModelTreeItem[],
+  ): AgentModelTreeItem {
+    const item = new vscode.TreeItem(
+      `fallbacks (${children.length})`,
+      vscode.TreeItemCollapsibleState.Collapsed,
+    ) as AgentModelTreeItem;
+    item.kind = 'fallbackGroup';
+    item.group = group;
+    item.nodeName = name;
+    item.id = `${group}:${name}:fallbacks`;
+    item.contextValue = 'detail';
+    item.iconPath = new vscode.ThemeIcon('references');
+    item.children = children;
+    return item;
+  }
+
+  private createFallbackChildren(
+    group: Exclude<AgentModelGroupKind, 'profiles'>,
+    name: string,
+    fallbacks: FallbackModels,
+  ): AgentModelTreeItem[] {
+    const entries = typeof fallbacks === 'string' ? [fallbacks] : fallbacks;
+    if (!Array.isArray(entries)) return [];
+    return entries.map((entry, index) => {
+      const model = typeof entry === 'string' ? entry : entry.model;
+      const details = typeof entry === 'string' ? [] : this.formatFallbackDetails(entry);
+      const item = new vscode.TreeItem(
+        details.length > 0 ? `${model} — ${details.join(', ')}` : model,
+        vscode.TreeItemCollapsibleState.None,
+      ) as AgentModelTreeItem;
+      item.kind = 'fallback';
+      item.group = group;
+      item.nodeName = name;
+      item.id = `${group}:${name}:fallback:${index}`;
+      item.contextValue = 'detail';
+      item.iconPath = new vscode.ThemeIcon('debug-step-over');
+      item.tooltip = details.length > 0 ? `${model}\n${details.join('\n')}` : model;
+      return item;
+    });
+  }
+
+  private formatFallbackDetails(entry: Exclude<Exclude<FallbackModels, string>[number], string>): string[] {
+    const details: string[] = [];
+    if (entry.variant !== undefined) details.push(`variant=${entry.variant}`);
+    if (entry.reasoningEffort !== undefined) details.push(`reasoning=${entry.reasoningEffort}`);
+    if (entry.temperature !== undefined) details.push(`temperature=${entry.temperature}`);
+    if (entry.top_p !== undefined) details.push(`top_p=${entry.top_p}`);
+    if (entry.maxTokens !== undefined) details.push(`maxTokens=${entry.maxTokens}`);
+    if (entry.thinking !== undefined) {
+      details.push(
+        entry.thinking.type === 'enabled' && entry.thinking.budgetTokens !== undefined
+          ? `thinking=enabled (${entry.thinking.budgetTokens})`
+          : `thinking=${entry.thinking.type}`,
+      );
+    }
+    return details;
   }
 
   // ---- Formatting helpers ----

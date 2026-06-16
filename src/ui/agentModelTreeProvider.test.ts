@@ -307,6 +307,54 @@ describe('AgentModelTreeProvider', () => {
       expect(sisyphus.tooltip).toContain('Fallback models: openai/gpt-4o, anthropic/claude-opus');
     });
 
+    it('renders configured agent params and fallbacks as expandable child nodes', () => {
+      configStore = makeConfigStoreStub({
+        sisyphus: {
+          model: 'openai/gpt-4',
+          variant: 'max',
+          temperature: 0.7,
+          top_p: 0.9,
+          maxTokens: 4096,
+          reasoningEffort: 'high',
+          thinking: { type: 'enabled', budgetTokens: 8192 },
+          textVerbosity: 'medium',
+          fallback_models: [
+            'openai/gpt-4o',
+            {
+              model: 'anthropic/claude-haiku',
+              temperature: 0.3,
+              reasoningEffort: 'low',
+            },
+          ],
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+
+      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.collapsibleState).toBe(1);
+
+      const children = provider.getChildren(sisyphus);
+      expect(children.map((child) => child.label)).toEqual([
+        'variant: max',
+        'reasoning: high',
+        'temperature: 0.7',
+        'top_p: 0.9',
+        'maxTokens: 4096',
+        'thinking: enabled, budget 8192',
+        'verbosity: medium',
+        'fallbacks (2)',
+      ]);
+      expect(children.every((child) => child.contextValue === 'detail')).toBe(true);
+
+      const fallbacks = children.find((child) => child.kind === 'fallbackGroup')!;
+      expect(fallbacks.collapsibleState).toBe(1);
+      expect(provider.getChildren(fallbacks).map((child) => child.label)).toEqual([
+        'openai/gpt-4o',
+        'anthropic/claude-haiku — reasoning=low, temperature=0.3',
+      ]);
+    });
+
     it('shows category params and fallbacks in the tooltip', () => {
       configStore = makeConfigStoreStub({}, {
         deep: {
@@ -325,6 +373,35 @@ describe('AgentModelTreeProvider', () => {
       expect(deep.tooltip).toContain('maxTokens=4096');
       expect(deep.tooltip).toContain('disabled');
       expect(deep.tooltip).toContain('Fallback models: fallback/model');
+    });
+
+    it('renders configured category params and string fallback as child nodes', () => {
+      configStore = makeConfigStoreStub({}, {
+        deep: {
+          model: 'deep/model',
+          top_p: 0.9,
+          maxTokens: 4096,
+          disable: true,
+          fallback_models: 'fallback/model',
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+
+      const group = provider.getChildren()!.find((g) => g.group === 'categories')!;
+      const deep = provider.getChildren(group).find((l) => l.nodeName === 'deep')!;
+      expect(deep.collapsibleState).toBe(1);
+
+      const children = provider.getChildren(deep);
+      expect(children.map((child) => child.label)).toEqual([
+        'top_p: 0.9',
+        'maxTokens: 4096',
+        'disabled: true',
+        'fallbacks (1)',
+      ]);
+      const fallbackGroup = children.find((child) => child.kind === 'fallbackGroup')!;
+      expect(provider.getChildren(fallbackGroup).map((child) => child.label)).toEqual([
+        'fallback/model',
+      ]);
     });
   });
 
