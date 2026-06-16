@@ -62,15 +62,23 @@ Profiles live next to the active config in `oh-my-openagent.profiles.json`.
 - Click the `Oh My OpenAgent` activity bar icon (robot symbol).
 - Or run the command `Oh My OpenAgent: Open Agent Manager` from the Command Palette.
 
-The sidebar shows three collapsible groups:
+The sidebar shows the active config file first, followed by three collapsible groups:
 
+- **Active config file** — the name of the file currently in use (e.g. `oh-my-openagent.json`). Hover to see the full resolved path. This helps when you have fallback configs across multiple files.
 - **Agents** — built-in agents; overridden agents are shown as override items.
 - **Categories** — built-in categories; overridden categories are shown as override items.
 - **Profiles** — saved snapshots of your agents and categories.
 
+Agents, categories, and profiles are expandable when they contain configured values:
+
+- An expanded agent or category shows its configured parameters (`variant`, `reasoning`, `temperature`, `top_p`, `maxTokens`, `thinking`, `verbosity`, `disabled`) and a `fallbacks (N)` group with each fallback model.
+- An expanded profile shows nested **Agents** and **Categories** subgroups with the same `name → model` leaves you see in the main tree, so you can inspect what the profile captured before activating it.
+
+The **Profiles** group always shows the active state: when no profile is active, a `No active profile` indicator appears at the top of the group. The active profile is marked with a check icon and an `(active)` description.
+
 ### Editing an agent or category
 
-1. Hover over the agent or category and click the pencil inline action, or right-click and choose `Edit Agent` / `Edit Category`. Both built-in items and existing override items can be edited.
+1. Hover over the agent or category and click the pencil inline action, or right-click and choose `Edit Agent` / `Edit Category`. Both built-in items, existing override items, and profile-contained items can be edited.
 2. The webview editor opens with sections for Model, Sampling, Thinking, and Fallback models.
 3. The Model field is a free-form text input with a lazy datalist. While the editor loads, the extension runs `opencode models --verbose` locally and offers the returned model IDs as autocomplete suggestions, together with each model's capabilities and variants. Any existing model value is preserved, even if it is not in the discovered list.
 4. Hover over the reload button next to the Model field to re-run discovery and refresh the model list at any time.
@@ -86,6 +94,7 @@ Right-click items in the Models view for more options:
 - On a built-in category: `Add Category Override` creates an empty override entry, and `Edit Category` opens the editor.
 - On an override item: `Edit Agent` / `Edit Category` opens the editor, and `Remove Override` deletes that override from the active config.
 - On a profile: `Activate`, `Rename`, `Duplicate`, or `Delete`.
+- Profile-contained agent/category leaves reuse the same `Edit Agent` / `Edit Category` commands as the main tree.
 
 The view title also provides `Refresh` and `Create Profile` buttons.
 

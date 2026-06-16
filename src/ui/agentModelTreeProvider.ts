@@ -5,7 +5,8 @@ import {
   BUILTIN_AGENTS,
   BUILTIN_CATEGORIES,
 } from '../config/schema.js';
-import type { AgentConfig, CategoryConfig, FallbackModels } from '../config/schema.js';
+import type { AgentConfig, CategoryConfig, FallbackModels, Profile } from '../config/schema.js';
+import * as path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Item shape
@@ -23,7 +24,9 @@ export type AgentModelItemKind =
   | 'profile'
   | 'detail'
   | 'fallbackGroup'
-  | 'fallback';
+  | 'fallback'
+  | 'configFile'
+  | 'noActiveProfile';
 
 /**
  * Extends `vscode.TreeItem` with a `kind` discriminator, the top-level
@@ -188,15 +191,16 @@ export class AgentModelTreeProvider
   getChildren(element?: AgentModelTreeItem): AgentModelTreeItem[] {
     if (!element) {
       return [
+        this.createConfigFileItem(),
         this.createGroup('Agents', 'agents'),
         this.createGroup('Categories', 'categories'),
         this.createGroup('Profiles', 'profiles'),
       ];
     }
+    if (element.children) {
+      return element.children;
+    }
     if (element.kind !== 'group') {
-      if (element.children) {
-        return element.children;
-      }
       return [];
     }
     switch (element.group) {
@@ -267,11 +271,18 @@ export class AgentModelTreeProvider
   private createProfileLeaves(): AgentModelTreeItem[] {
     const profiles = this.profileStore.listProfiles();
     const active = this.profileStore.getActiveProfileName();
-    return profiles.map((profile) => {
+    const items: AgentModelTreeItem[] = [];
+    if (active === undefined) {
+      items.push(this.createNoActiveProfileItem());
+    }
+    for (const profile of profiles) {
       const isActive = profile.name === active;
+      const children = this.createProfileContentChildren(profile);
       const item = new vscode.TreeItem(
         profile.name,
-        vscode.TreeItemCollapsibleState.None,
+        children.length > 0
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None,
       ) as AgentModelTreeItem;
       item.kind = 'profile';
       item.group = 'profiles';
@@ -281,8 +292,10 @@ export class AgentModelTreeProvider
       item.iconPath = new vscode.ThemeIcon(isActive ? 'check' : 'file');
       item.description = isActive ? '(active)' : undefined;
       item.tooltip = profile.description ?? profile.name;
-      return item;
-    });
+      item.children = children;
+      items.push(item);
+    }
+    return items;
   }
 
   private createLeaf(args: {
@@ -309,6 +322,104 @@ export class AgentModelTreeProvider
     item.iconPath = new vscode.ThemeIcon(args.icon);
     item.tooltip = args.tooltip;
     item.children = args.children;
+    return item;
+  }
+
+  private createConfigFileItem(): AgentModelTreeItem {
+    const configPath = this.configStore.getConfigPath();
+    const item = new vscode.TreeItem(
+      path.basename(configPath),
+      vscode.TreeItemCollapsibleState.None,
+    ) as AgentModelTreeItem;
+    item.kind = 'configFile';
+    item.id = '__omo_config_file__';
+    item.contextValue = 'configFile';
+    item.iconPath = new vscode.ThemeIcon('file-code');
+    item.tooltip = configPath;
+    return item;
+  }
+
+  private createNoActiveProfileItem(): AgentModelTreeItem {
+    const item = new vscode.TreeItem(
+      'No active profile',
+      vscode.TreeItemCollapsibleState.None,
+    ) as AgentModelTreeItem;
+    item.kind = 'noActiveProfile';
+    item.id = '__omo_no_active_profile__';
+    item.contextValue = 'noActiveProfile';
+    item.iconPath = new vscode.ThemeIcon('circle-slash');
+    item.tooltip = 'No profile is currently active';
+    return item;
+  }
+
+  private createProfileContentChildren(profile: Profile): AgentModelTreeItem[] {
+    const agents = profile.agents ?? {};
+    const categories = profile.categories ?? {};
+    const hasAgents = Object.keys(agents).length > 0;
+    const hasCategories = Object.keys(categories).length > 0;
+    if (!hasAgents && !hasCategories) return [];
+    const children: AgentModelTreeItem[] = [];
+    if (hasAgents) {
+      children.push(this.createProfileGroup(profile.name, 'agents', agents));
+    }
+    if (hasCategories) {
+      children.push(this.createProfileGroup(profile.name, 'categories', categories));
+    }
+    return children;
+  }
+
+  private createProfileGroup(
+    profileName: string,
+    group: 'agents' | 'categories',
+    configs: Record<string, AgentConfig | CategoryConfig>,
+  ): AgentModelTreeItem {
+    const label = group === 'agents' ? 'Agents' : 'Categories';
+    const items = Object.keys(configs).sort().map((name) =>
+      this.createProfileConfigChild(profileName, group, name, configs[name]),
+    );
+    const item = new vscode.TreeItem(
+      label,
+      vscode.TreeItemCollapsibleState.Collapsed,
+    ) as AgentModelTreeItem;
+    item.kind = 'group';
+    item.group = 'profiles';
+    item.nodeName = `${profileName}:${group}`;
+    item.id = `profile:${profileName}:${group}`;
+    item.contextValue = 'profileGroup';
+    item.iconPath = new vscode.ThemeIcon(group === 'agents' ? 'robot' : 'symbol-class');
+    item.children = items;
+    return item;
+  }
+
+  private createProfileConfigChild(
+    profileName: string,
+    group: 'agents' | 'categories',
+    name: string,
+    config: AgentConfig | CategoryConfig,
+  ): AgentModelTreeItem {
+    const model = config.model;
+    const label = `${name} \u2192 ${model ?? 'default'}`;
+    const item = new vscode.TreeItem(
+      label,
+      vscode.TreeItemCollapsibleState.None,
+    ) as AgentModelTreeItem;
+    item.kind = group === 'agents' ? 'agent' : 'category';
+    item.group = group;
+    item.nodeName = name;
+    item.id = `profile:${profileName}:${group === 'agents' ? 'agent' : 'category'}:${name}`;
+    item.contextValue = group === 'agents' ? 'agent' : 'category';
+    item.iconPath = new vscode.ThemeIcon(group === 'agents' ? 'person' : 'tag');
+    const params = this.formatParams(config);
+    item.tooltip = [
+      `${group === 'agents' ? 'Agent' : 'Category'}: ${name}`,
+      `Model: ${model ?? 'default'}`,
+      ...(params.length > 0 ? [params] : []),
+    ].join('\n');
+    item.command = {
+      command: group === 'agents' ? 'ohMyOpenAgent.editAgent' : 'ohMyOpenAgent.editCategory',
+      title: 'Edit',
+      arguments: [{ kind: item.kind, nodeName: name }],
+    };
     return item;
   }
 

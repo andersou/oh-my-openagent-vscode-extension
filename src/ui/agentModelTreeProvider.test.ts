@@ -67,11 +67,13 @@ vi.mock('vscode', () => {
 function makeConfigStoreStub(
   agents: Record<string, object> = {},
   categories: Record<string, object> = {},
+  configPath: string = '/fake/path/oh-my-openagent.json',
 ): ConfigStore {
   return {
     onDidChange: new EventEmitter(),
     getAgent: (name: string) => agents[name] as { model?: string } | undefined,
     getCategory: (name: string) => categories[name] as { model?: string } | undefined,
+    getConfigPath: () => configPath,
   } as unknown as ConfigStore;
 }
 
@@ -101,20 +103,23 @@ describe('AgentModelTreeProvider', () => {
     provider = new AgentModelTreeProvider(configStore, profileStore);
   });
 
-  it('returns three top-level groups at the root', () => {
+  it('returns four top-level items at the root', () => {
     const roots = provider.getChildren();
-    expect(roots).toHaveLength(3);
-    expect(roots.map((r) => r.label)).toEqual([
+    expect(roots).toHaveLength(4);
+    expect(roots[0].kind).toBe('configFile');
+    expect(roots[0].label).toBe('oh-my-openagent.json');
+    expect(roots[0].tooltip).toBe('/fake/path/oh-my-openagent.json');
+    expect(roots.slice(1).map((r) => r.label)).toEqual([
       'Agents',
       'Categories',
       'Profiles',
     ]);
-    expect(roots.map((r) => r.group)).toEqual([
+    expect(roots.slice(1).map((r) => r.group)).toEqual([
       'agents',
       'categories',
       'profiles',
     ]);
-    expect(roots.every((r) => r.kind === 'group')).toBe(true);
+    expect(roots.slice(1).every((r) => r.kind === 'group')).toBe(true);
   });
 
   it('returns one leaf per built-in agent with contextValue "agent" by default', () => {
@@ -181,6 +186,80 @@ describe('AgentModelTreeProvider', () => {
       expect(leaf.kind).toBe('profile');
       expect(leaf.contextValue).toBe('profile');
     }
+  });
+
+  it('shows a "No active profile" indicator when profiles exist but none is active', () => {
+    const profiles: Profile[] = [{ name: 'fast' }];
+    profileStore = makeProfileStoreStub(profiles, undefined);
+    provider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const leaves = provider.getChildren(group);
+    expect(leaves[0].kind).toBe('noActiveProfile');
+    expect(leaves[0].label).toBe('No active profile');
+    expect(leaves.slice(1).map((l) => l.nodeName)).toEqual(['fast']);
+  });
+
+  it('does not show "No active profile" when a profile is active', () => {
+    const profiles: Profile[] = [{ name: 'fast' }];
+    profileStore = makeProfileStoreStub(profiles, 'fast');
+    provider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const leaves = provider.getChildren(group);
+    expect(leaves.some((l) => l.kind === 'noActiveProfile')).toBe(false);
+    expect(leaves.map((l) => l.nodeName)).toEqual(['fast']);
+  });
+
+  it('shows "No active profile" even when there are no profiles', () => {
+    profileStore = makeProfileStoreStub([], undefined);
+    provider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const leaves = provider.getChildren(group);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0].kind).toBe('noActiveProfile');
+    expect(leaves[0].label).toBe('No active profile');
+  });
+
+  it('renders profile content as nested Agents/Categories groups', () => {
+    const profiles: Profile[] = [
+      {
+        name: 'fast',
+        agents: {
+          sisyphus: { model: 'openai/gpt-4', temperature: 0.7 },
+        },
+        categories: {
+          quick: { model: 'openai/gpt-3.5' },
+        },
+      },
+    ];
+    profileStore = makeProfileStoreStub(profiles, 'fast');
+    provider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const fast = provider.getChildren(group).find((l) => l.nodeName === 'fast')!;
+    expect(fast.collapsibleState).toBe(1);
+
+    const subGroups = provider.getChildren(fast);
+    expect(subGroups.map((c) => ({ label: c.label, nodeName: c.nodeName, kind: c.kind }))).toEqual([
+      { label: 'Agents', nodeName: 'fast:agents', kind: 'group' },
+      { label: 'Categories', nodeName: 'fast:categories', kind: 'group' },
+    ]);
+
+    const agentsGroup = subGroups.find((c) => c.nodeName === 'fast:agents')!;
+    const agentItems = provider.getChildren(agentsGroup);
+    expect(agentItems.map((c) => c.label)).toEqual(['sisyphus \u2192 openai/gpt-4']);
+    expect(agentItems[0].kind).toBe('agent');
+    expect(agentItems[0].contextValue).toBe('agent');
+    expect((agentItems[0].iconPath as { id: string }).id).toBe('person');
+
+    const categoriesGroup = subGroups.find((c) => c.nodeName === 'fast:categories')!;
+    const categoryItems = provider.getChildren(categoriesGroup);
+    expect(categoryItems.map((c) => c.label)).toEqual(['quick \u2192 openai/gpt-3.5']);
+    expect(categoryItems[0].kind).toBe('category');
+    expect(categoryItems[0].contextValue).toBe('category');
+    expect((categoryItems[0].iconPath as { id: string }).id).toBe('tag');
   });
 
   it('marks the active profile with a check icon and "(active)" description', () => {

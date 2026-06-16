@@ -351,7 +351,7 @@
   });
 </script>
 
-<svelte:window on:keydown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSave(); }} />
+<svelte:window onkeydown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSave(); }} />
 
 <main class="editor" id="editor" aria-busy={!initialized}>
   <header class="editor__header">
@@ -360,7 +360,7 @@
     <p class="editor__subtitle" id="subtitle">{entityName ?? ''}</p>
   </header>
 
-  <form id="editor-form" class="editor__form" on:submit|preventDefault={onSave} novalidate autocomplete="off">
+  <form id="editor-form" class="editor__form" onsubmit={(e) => { e.preventDefault(); onSave(); }} novalidate autocomplete="off">
     <section class="editor__section" data-section="model">
       <header class="editor__section-header">
         <h2 class="editor__section-title">Model</h2>
@@ -381,8 +381,8 @@
             autocapitalize="off"
             autocorrect="off"
             bind:value={model}
-            on:input={onModelInput}
-            on:change={onModelInput}
+            oninput={onModelInput}
+            onchange={onModelInput}
           />
           <button
             type="button"
@@ -390,7 +390,7 @@
             id="btn-reload-models"
             title="Reload available models from the local opencode CLI"
             aria-label="Reload available models"
-            on:click={onReloadModels}
+            onclick={onReloadModels}
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
               <path d="M4.5 2A1.5 1.5 0 0 0 3 3.5v.35a.5.5 0 0 0 1 0V3.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5v-.35a.5.5 0 0 0-1 0v.35A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 11.5 1h-7ZM8.854 5.146a.5.5 0 0 0-.708 0l-2.5 2.5a.5.5 0 1 0 .708.708L8 6.207l2.146 2.147a.5.5 0 1 0 .708-.708l-2.5-2.5a.5.5 0 0 0-.708 0Z"/>
@@ -416,7 +416,7 @@
       <div class="field-grid">
         <div class="field">
           <label class="field__label" for="f-variant">Variant</label>
-          <select class="field__input" id="f-variant" name="variant" bind:value={variant} on:change={onFieldChange} disabled={!model}>
+          <select class="field__input" id="f-variant" name="variant" bind:value={variant} onchange={onFieldChange} disabled={!model}>
             {#each availableVariants as v}
               <option value={v}>{v === '' ? '(default)' : v}</option>
             {/each}
@@ -425,7 +425,7 @@
 
         <div class="field">
           <label class="field__label" for="f-reasoning">Reasoning effort</label>
-          <select class="field__input" id="f-reasoning" name="reasoningEffort" bind:value={reasoning} on:change={onFieldChange} disabled={!reasoningSupported}>
+          <select class="field__input" id="f-reasoning" name="reasoningEffort" bind:value={reasoning} onchange={onFieldChange} disabled={!reasoningSupported}>
             {#each availableReasoning as r}
               <option value={r}>{r === '' ? '(default)' : r}</option>
             {/each}
@@ -443,15 +443,15 @@
       <div class="field-grid field-grid--three">
         <div class="field">
           <label class="field__label" for="f-temperature">Temperature</label>
-          <input class="field__input" type="number" id="f-temperature" name="temperature" step="0.1" min="0" max="2" inputmode="decimal" placeholder="0.0 \u2013 2.0" bind:value={temperature} on:input={onFieldChange} on:change={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support temperature.'} />
+          <input class="field__input" type="number" id="f-temperature" name="temperature" step="0.1" min="0" max="2" inputmode="decimal" placeholder="0.0 \u2013 2.0" bind:value={temperature} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support temperature.'} />
         </div>
         <div class="field">
           <label class="field__label" for="f-top-p">Top-p</label>
-          <input class="field__input" type="number" id="f-top-p" name="top_p" step="0.05" min="0" max="1" inputmode="decimal" placeholder="0.0 \u2013 1.0" bind:value={topP} on:input={onFieldChange} on:change={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support sampling parameters.'} />
+          <input class="field__input" type="number" id="f-top-p" name="top_p" step="0.05" min="0" max="1" inputmode="decimal" placeholder="0.0 \u2013 1.0" bind:value={topP} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support sampling parameters.'} />
         </div>
         <div class="field">
           <label class="field__label" for="f-max-tokens">Max tokens</label>
-          <input class="field__input" type="number" id="f-max-tokens" name="maxTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 4096" bind:value={maxTokens} on:input={onFieldChange} on:change={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support max tokens.'} />
+          <input class="field__input" type="number" id="f-max-tokens" name="maxTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 4096" bind:value={maxTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support max tokens.'} />
         </div>
       </div>
     </section>
@@ -463,13 +463,13 @@
       </header>
 
       <div class="field field--checkbox">
-        <input class="field__checkbox" type="checkbox" id="f-thinking-enabled" name="thinkingEnabled" bind:checked={thinkingEnabled} on:change={onThinkingToggle} disabled={!reasoningSupported} />
+        <input class="field__checkbox" type="checkbox" id="f-thinking-enabled" name="thinkingEnabled" bind:checked={thinkingEnabled} onchange={onThinkingToggle} disabled={!reasoningSupported} />
         <label class="field__label field__label--inline" for="f-thinking-enabled">Enable extended thinking</label>
       </div>
 
       <div class="field field--nested" id="f-budget-field" hidden={!thinkingEnabled}>
         <label class="field__label" for="f-budget-tokens">Budget tokens</label>
-        <input class="field__input" type="number" id="f-budget-tokens" name="budgetTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 8192" bind:value={budgetTokens} on:input={onFieldChange} on:change={onFieldChange} disabled={!reasoningSupported} />
+        <input class="field__input" type="number" id="f-budget-tokens" name="budgetTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 8192" bind:value={budgetTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!reasoningSupported} />
         <p class="field__hint">Token budget reserved for chain-of-thought reasoning.</p>
       </div>
     </section>
@@ -485,16 +485,16 @@
           <div class="fallback-card" role="listitem">
             <div class="fallback-card__header">
               <h3 class="fallback-card__title">Fallback {i + 1}</h3>
-              <button type="button" class="fallback-card__remove" on:click={() => onRemoveFallback(i)}>Remove</button>
+              <button type="button" class="fallback-card__remove" onclick={() => onRemoveFallback(i)}>Remove</button>
             </div>
             <div class="fallback-card__row">
               <div class="field">
                 <label class="field__label" for="fb-model-{i}">Model</label>
-                <input class="field__input field__input--mono" type="text" id="fb-model-{i}" list="model-datalist" placeholder="provider/model-name" spellcheck="false" autocapitalize="off" autocorrect="off" bind:value={entry.model} on:input={onFieldChange} />
+                <input class="field__input field__input--mono" type="text" id="fb-model-{i}" list="model-datalist" placeholder="provider/model-name" spellcheck="false" autocapitalize="off" autocorrect="off" bind:value={entry.model} oninput={onFieldChange} />
               </div>
               <div class="field">
                 <label class="field__label" for="fb-variant-{i}">Variant</label>
-                <select class="field__input" id="fb-variant-{i}" bind:value={entry.variant} on:change={onFieldChange}>
+                <select class="field__input" id="fb-variant-{i}" bind:value={entry.variant} onchange={onFieldChange}>
                   <option value="">(default)</option>
                   {#each FALLBACK_VARIANTS as v}
                     <option value={v}>{v}</option>
@@ -503,7 +503,7 @@
               </div>
               <div class="field">
                 <label class="field__label" for="fb-reasoning-{i}">Reasoning</label>
-                <select class="field__input" id="fb-reasoning-{i}" bind:value={entry.reasoningEffort} on:change={onFieldChange}>
+                <select class="field__input" id="fb-reasoning-{i}" bind:value={entry.reasoningEffort} onchange={onFieldChange}>
                   <option value="">(default)</option>
                   {#each FALLBACK_REASONING as r}
                     <option value={r}>{r}</option>
@@ -514,39 +514,39 @@
             <div class="fallback-card__row fallback-card__row--sampling">
               <div class="field">
                 <label class="field__label" for="fb-temperature-{i}">Temperature</label>
-                <input class="field__input" type="number" id="fb-temperature-{i}" step="0.1" min="0" max="2" bind:value={entry.temperature} on:input={onFieldChange} />
+                <input class="field__input" type="number" id="fb-temperature-{i}" step="0.1" min="0" max="2" bind:value={entry.temperature} oninput={onFieldChange} />
               </div>
               <div class="field">
                 <label class="field__label" for="fb-top-p-{i}">Top-p</label>
-                <input class="field__input" type="number" id="fb-top-p-{i}" step="0.05" min="0" max="1" bind:value={entry.top_p} on:input={onFieldChange} />
+                <input class="field__input" type="number" id="fb-top-p-{i}" step="0.05" min="0" max="1" bind:value={entry.top_p} oninput={onFieldChange} />
               </div>
               <div class="field">
                 <label class="field__label" for="fb-max-tokens-{i}">Max tokens</label>
-                <input class="field__input" type="number" id="fb-max-tokens-{i}" step="1" min="1" bind:value={entry.maxTokens} on:input={onFieldChange} />
+                <input class="field__input" type="number" id="fb-max-tokens-{i}" step="1" min="1" bind:value={entry.maxTokens} oninput={onFieldChange} />
               </div>
             </div>
             <div class="fallback-card__row fallback-card__row--thinking">
               <div class="fallback-card__checkbox">
-                <input type="checkbox" id="fb-thinking-{i}" bind:checked={entry.thinking} on:change={onFieldChange} />
+                <input type="checkbox" id="fb-thinking-{i}" bind:checked={entry.thinking} onchange={onFieldChange} />
                 <label for="fb-thinking-{i}">Enable thinking</label>
               </div>
               <div class="field">
                 <label class="field__label" for="fb-budget-{i}">Budget tokens</label>
-                <input class="field__input" type="number" id="fb-budget-{i}" step="1" min="1" bind:value={entry.thinking.budgetTokens} disabled={!entry.thinking} on:input={onFieldChange} />
+                <input class="field__input" type="number" id="fb-budget-{i}" step="1" min="1" bind:value={entry.thinking.budgetTokens} disabled={!entry.thinking} oninput={onFieldChange} />
               </div>
             </div>
           </div>
         {/each}
       </div>
 
-      <button type="button" class="vscode-button vscode-button--secondary" id="btn-add-fallback" on:click={onAddFallback}>Add fallback</button>
+      <button type="button" class="vscode-button vscode-button--secondary" id="btn-add-fallback" onclick={onAddFallback}>Add fallback</button>
     </section>
 
     <div class="editor__status editor__status--{status.type || 'info'}" id="status" role="status" aria-live="polite" hidden={!status.message}>{status.message}</div>
 
     <div class="editor__actions">
-      <button type="button" class="vscode-button vscode-button--secondary" id="btn-create-profile" on:click={onCreateProfile} disabled={!initialized}>Create Profile</button>
-      <button type="button" class="vscode-button vscode-button--primary" id="btn-save" on:click={onSave} disabled={!initialized}>Save</button>
+      <button type="button" class="vscode-button vscode-button--secondary" id="btn-create-profile" onclick={onCreateProfile} disabled={!initialized}>Create Profile</button>
+      <button type="button" class="vscode-button vscode-button--primary" id="btn-save" onclick={onSave} disabled={!initialized}>Save</button>
     </div>
   </form>
 </main>
