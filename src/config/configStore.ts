@@ -279,6 +279,7 @@ export class ConfigStore {
     // Update cache
     this.cachedRaw = text;
     this.cachedConfig = draft;
+    this._emitter.emit('change');
   }
 
   // ---- File watching ----

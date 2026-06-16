@@ -4,18 +4,43 @@ import { execFile } from 'node:child_process';
 // Public API: ModelDiscovery service
 //
 // Discovers available models by running `opencode models` via an injected
-// ProcessExecutor. On success it parses one model ID per line from stdout,
-// trims whitespace, skips blank lines, deduplicates preserving first-occurrence
-// order, and returns `{ models: [{ modelId }], source: 'cli' }`.
+// ProcessExecutor. By default it parses one model ID per line; with
+// `{ verbose: true }` it also parses the JSON metadata block that follows
+// each ID, exposing capabilities and variants.
+//
+// Results are cached in memory after the first successful CLI call. Pass
+// `{ forceRefresh: true }` to bypass the cache and re-run discovery.
 //
 // On any error (command not found, non-zero exit, timeout, exception) it
 // returns `{ models: [], source: 'fallback', error: 'human-readable message' }`
 // and never throws.
 // ---------------------------------------------------------------------------
 
+/** Capabilities object returned by `opencode models --verbose`. */
+export interface ModelCapabilities {
+  temperature?: boolean;
+  reasoning?: boolean;
+  attachment?: boolean;
+  toolcall?: boolean;
+  input?: Record<string, boolean>;
+  output?: Record<string, boolean>;
+  interleaved?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 /** A single model parsed from `opencode models` output. */
 export interface ModelInfo {
   modelId: string;
+  capabilities?: ModelCapabilities;
+  variants?: Record<string, unknown>;
+}
+
+/** Options controlling a single discovery call. */
+export interface DiscoverModelsOptions {
+  /** When true, runs `opencode models --verbose` and parses metadata. */
+  verbose?: boolean;
+  /** When true, ignores any cached result and re-runs the CLI. */
+  forceRefresh?: boolean;
 }
 
 /** The shape returned by discoverModels(). */
@@ -58,6 +83,7 @@ export class ModelDiscovery {
   private readonly executor: ProcessExecutor;
   private readonly baseDir: string;
   private readonly timeoutMs?: number;
+  private readonly cache = new Map<string, ModelDiscoveryResult>();
 
   constructor(
     executor: ProcessExecutor,
@@ -72,23 +98,49 @@ export class ModelDiscovery {
   /**
    * Runs `opencode models` and parses the output.
    *
-   * - One model ID per line in stdout → `{ modelId }`.
-   * - Trims whitespace, skips blank / whitespace-only lines.
-   * - Deduplicates (case-sensitive) preserving first-occurrence order.
+   * - With `verbose: false` (default), parses one model ID per line.
+   * - With `verbose: true`, runs `opencode models --verbose` and parses each
+   *   model ID followed by its JSON metadata block, exposing capabilities
+   *   and variants.
+   * - Results are cached in memory. Use `forceRefresh: true` to invalidate.
    * - Returns `source: 'cli'` + models on success (exit code 0).
    * - Returns `source: 'fallback'` + error message on any failure.
    * - **Never throws.**
    */
-  async discoverModels(): Promise<ModelDiscoveryResult> {
+  async discoverModels(
+    options: DiscoverModelsOptions = {},
+  ): Promise<ModelDiscoveryResult> {
+    const cacheKey = this.buildCacheKey(options);
+
+    if (!options.forceRefresh) {
+      const cached = this.cache.get(cacheKey);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    const result = await this.runDiscovery(options);
+
+    // Cache successful CLI results and graceful fallbacks so the UI stays
+    // stable across repeated calls. Fallbacks are cached too because they
+    // represent a valid "no models available" state.
+    this.cache.set(cacheKey, result);
+    return result;
+  }
+
+  private async runDiscovery(
+    options: DiscoverModelsOptions,
+  ): Promise<ModelDiscoveryResult> {
     try {
+      const args = options.verbose ? ['models', '--verbose'] : ['models'];
       let result: ProcessResult;
 
       if (this.timeoutMs !== undefined) {
-        result = await this.executor.exec('opencode', ['models'], {
+        result = await this.executor.exec('opencode', args, {
           timeout: this.timeoutMs,
         });
       } else {
-        result = await this.executor.exec('opencode', ['models']);
+        result = await this.executor.exec('opencode', args);
       }
 
       if (result.exitCode !== 0) {
@@ -102,22 +154,9 @@ export class ModelDiscovery {
         };
       }
 
-      // Parse stdout: split lines, trim, skip blanks, deduplicate
-      const lines = result.stdout.split('\n');
-      const seen = new Set<string>();
-      const models: ModelInfo[] = [];
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.length === 0) {
-          continue;
-        }
-        if (seen.has(trimmed)) {
-          continue;
-        }
-        seen.add(trimmed);
-        models.push({ modelId: trimmed });
-      }
+      const models = options.verbose
+        ? parseVerboseOutput(result.stdout)
+        : parseIdOnlyOutput(result.stdout);
 
       return { models, source: 'cli' };
     } catch (err: unknown) {
@@ -129,6 +168,148 @@ export class ModelDiscovery {
       };
     }
   }
+
+  private buildCacheKey(options: DiscoverModelsOptions): string {
+    // forceRefresh is behavior, not cache identity.
+    return JSON.stringify({ verbose: options.verbose ?? false });
+  }
+}
+
+/**
+ * Parse the plain `opencode models` output: one model ID per line.
+ * Trims whitespace, skips blank lines, deduplicates preserving order.
+ */
+function parseIdOnlyOutput(stdout: string): ModelInfo[] {
+  const lines = stdout.split('\n');
+  const seen = new Set<string>();
+  const models: ModelInfo[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    models.push({ modelId: trimmed });
+  }
+
+  return models;
+}
+
+/**
+ * Parse `opencode models --verbose` output.
+ *
+ * Each model is an ID line followed by a JSON object. The JSON object may
+ * span multiple lines. We accumulate lines after an ID until the brace
+ * depth returns to zero, then the next non-blank line is a new model ID.
+ */
+function parseVerboseOutput(stdout: string): ModelInfo[] {
+  const lines = stdout.split('\n');
+  const models: ModelInfo[] = [];
+
+  let currentId: string | null = null;
+  let currentJsonLines: string[] = [];
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let inString = false;
+  let escape = false;
+
+  function flushCurrentModel(): void {
+    if (currentId === null) {
+      return;
+    }
+    const model: ModelInfo = { modelId: currentId };
+    if (currentJsonLines.length > 0) {
+      const jsonText = currentJsonLines.join('\n');
+      try {
+        const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+        if (
+          parsed.capabilities !== undefined &&
+          typeof parsed.capabilities === 'object' &&
+          parsed.capabilities !== null
+        ) {
+          model.capabilities = parsed.capabilities as ModelCapabilities;
+        }
+        if (
+          parsed.variants !== undefined &&
+          typeof parsed.variants === 'object' &&
+          parsed.variants !== null
+        ) {
+          model.variants = parsed.variants as Record<string, unknown>;
+        }
+      } catch {
+        // Malformed JSON for this model: keep the ID and discard metadata.
+      }
+    }
+    models.push(model);
+    currentId = null;
+    currentJsonLines = [];
+    braceDepth = 0;
+    bracketDepth = 0;
+    inString = false;
+    escape = false;
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      if (currentId !== null) {
+        currentJsonLines.push(line);
+      }
+      continue;
+    }
+
+    if (currentId === null) {
+      currentId = trimmed;
+      continue;
+    }
+
+    currentJsonLines.push(line);
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (inString) {
+        if (ch === '\\') {
+          escape = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '{') {
+        braceDepth++;
+      } else if (ch === '}') {
+        braceDepth--;
+        if (braceDepth === 0 && bracketDepth === 0) {
+          flushCurrentModel();
+        }
+      } else if (ch === '[') {
+        bracketDepth++;
+      } else if (ch === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+      }
+    }
+  }
+
+  flushCurrentModel();
+
+  // Deduplicate preserving first-occurrence order.
+  const seen = new Set<string>();
+  return models.filter((m) => {
+    if (seen.has(m.modelId)) {
+      return false;
+    }
+    seen.add(m.modelId);
+    return true;
+  });
 }
 
 /**

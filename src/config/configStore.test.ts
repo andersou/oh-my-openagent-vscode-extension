@@ -200,5 +200,37 @@ describe('ConfigStore', () => {
       // Cache should be invalidated — next getConfig re-reads
       expect(store.getAgent('sisyphus')?.model).toBe('changed/externally');
     });
+
+    it('emits after a programmatic updateConfig that changes content', async () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      store = new ConfigStore(tmpDir);
+
+      let fired = false;
+      store.onDidChange.once('change', () => {
+        fired = true;
+      });
+
+      await store.updateConfig((draft) => {
+        if (!draft.agents) draft.agents = {};
+        if (!draft.agents.sisyphus) draft.agents.sisyphus = {};
+        draft.agents.sisyphus.model = 'new/model';
+      });
+
+      expect(fired).toBe(true);
+    });
+
+    it('does not emit after a no-op updateConfig', async () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      store = new ConfigStore(tmpDir);
+
+      let fired = false;
+      store.onDidChange.once('change', () => {
+        fired = true;
+      });
+
+      await store.updateConfig(() => undefined);
+
+      expect(fired).toBe(false);
+    });
   });
 });

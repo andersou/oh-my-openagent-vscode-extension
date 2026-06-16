@@ -47,7 +47,7 @@ interface WebviewTestEnv {
  * loaded. Returns the window and arrays that record every message sent
  * to the host and every state snapshot persisted.
  */
-function createWebviewWindow(): WebviewTestEnv {
+async function createWebviewWindow(): Promise<WebviewTestEnv> {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   const js = fs.readFileSync(JS_PATH, 'utf8');
 
@@ -96,6 +96,9 @@ function createWebviewWindow(): WebviewTestEnv {
   window.document.write(htmlNoScript);
   window.document.close();
 
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await window.happyDOM.waitUntilComplete();
+
   // Run the bundled webview in the window's global scope. The bundle is
   // an IIFE that wires up event listeners and calls boot().
   window.eval(js);
@@ -110,8 +113,8 @@ function createWebviewWindow(): WebviewTestEnv {
 describe('webview lazy model picker (end-to-end)', () => {
   let env: WebviewTestEnv;
 
-  beforeEach(() => {
-    env = createWebviewWindow();
+  beforeEach(async () => {
+    env = await createWebviewWindow();
   });
 
   afterEach(async () => {
@@ -235,5 +238,312 @@ describe('webview lazy model picker (end-to-end)', () => {
         (m as { command?: unknown }).command === 'save',
     );
     expect(saveMessages).toHaveLength(0);
+  });
+
+  it('renders a reload button that posts reloadModels', async () => {
+    const { window, messages } = env;
+    const document = window.document;
+    await window.happyDOM.waitUntilComplete();
+
+    const btnReload = document.getElementById('btn-reload-models') as HTMLButtonElement;
+    expect(btnReload).not.toBeNull();
+    expect(btnReload.title.length).toBeGreaterThan(0);
+
+    btnReload.click();
+    await window.happyDOM.waitUntilComplete();
+
+    expect(messages).toContainEqual({ command: 'reloadModels' });
+  });
+
+  it('posts modelChanged when the model input changes', async () => {
+    const { window, messages } = env;
+    const document = window.document;
+
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'custom/model' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const modelInput = document.getElementById('f-model') as HTMLInputElement;
+    modelInput.value = 'openai/gpt-4.1';
+    modelInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    modelInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    expect(messages).toContainEqual({ command: 'modelChanged', modelId: 'openai/gpt-4.1' });
+  });
+
+  it('updates dynamic fields based on selected model capabilities', async () => {
+    const { window } = env;
+    const document = window.document;
+
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'no-temp/model' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({
+      command: 'modelsLoaded',
+      models: [
+        {
+          modelId: 'no-temp/model',
+          capabilities: { temperature: false, reasoning: true },
+          variants: { low: { reasoningEffort: 'low' } },
+        },
+      ],
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const temperatureInput = document.getElementById('f-temperature') as HTMLInputElement;
+    expect(temperatureInput.disabled).toBe(true);
+    expect(temperatureInput.title).toContain('temperature');
+
+    const reasoningSelect = document.getElementById('f-reasoning') as HTMLSelectElement;
+    expect(reasoningSelect.disabled).toBe(false);
+
+    const variantSelect = document.getElementById('f-variant') as HTMLSelectElement;
+    const variantOptions = Array.from(variantSelect.options).map((o) => o.value);
+    expect(variantOptions).toContain('low');
+  });
+
+  it('enables inputs when the model supports the capability', async () => {
+    const { window } = env;
+    const document = window.document;
+
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'full/model' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({
+      command: 'modelsLoaded',
+      models: [
+        {
+          modelId: 'full/model',
+          capabilities: { temperature: true, reasoning: true },
+        },
+      ],
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const temperatureInput = document.getElementById('f-temperature') as HTMLInputElement;
+    expect(temperatureInput.disabled).toBe(false);
+  });
+
+  it('adds a fallback card when the Add button is clicked', async () => {
+    const { window } = env;
+    await new Promise((r) => setTimeout(r, 50));
+    await window.happyDOM.waitUntilComplete();
+
+    const btnAdd = window.document.getElementById('btn-add-fallback') as HTMLButtonElement;
+    expect(btnAdd).not.toBeNull();
+    const list = window.document.getElementById('fallback-list');
+    expect(list).not.toBeNull();
+
+    btnAdd.click();
+    await window.happyDOM.waitUntilComplete();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const cards = window.document.querySelectorAll('.fallback-card');
+    expect(cards).toHaveLength(1);
+  });
+
+  it('renders existing fallback models as cards on init', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: {
+        model: 'main/model',
+        fallback_models: [
+          'openai/gpt-4o',
+          { model: 'anthropic/claude-haiku', temperature: 0.3 },
+        ],
+      },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const cards = window.document.querySelectorAll('.fallback-card');
+    expect(cards).toHaveLength(2);
+  });
+
+  it('removes a fallback card when Remove is clicked', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model', fallback_models: ['a', 'b'] },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const removeBtn = window.document.querySelector('.fallback-card__remove') as HTMLButtonElement;
+    removeBtn.click();
+    await window.happyDOM.waitUntilComplete();
+
+    const cards = window.document.querySelectorAll('.fallback-card');
+    expect(cards).toHaveLength(1);
+  });
+
+  it('serializes fallback cards into the save payload', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: {
+        model: 'main/model',
+        fallback_models: [{ model: 'openai/gpt-4o', temperature: 0.3 }],
+      },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const saveBtn = window.document.getElementById('btn-save') as HTMLButtonElement;
+    saveBtn.click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveMessage = messages.find(
+      (m): m is { command: string; payload: { fallback_models?: unknown } } =>
+        typeof m === 'object' &&
+        m !== null &&
+        (m as { command?: unknown }).command === 'save',
+    );
+    expect(saveMessage).toBeDefined();
+    expect(saveMessage?.payload.fallback_models).toEqual([
+      { model: 'openai/gpt-4o', temperature: 0.3 },
+    ]);
+  });
+
+  it('debounces modelChanged messages while typing', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: '' },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const modelInput = window.document.getElementById('f-model') as HTMLInputElement;
+    modelInput.value = 'o';
+    modelInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    modelInput.value = 'op';
+    modelInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    modelInput.value = 'openai/gpt-4';
+    modelInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+    await new Promise((r) => setTimeout(r, 50));
+    const immediate = messages.filter(
+      (m): m is { command: string; modelId: string } =>
+        typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'modelChanged',
+    );
+    expect(immediate).toHaveLength(0);
+
+    await new Promise((r) => setTimeout(r, 300));
+    const after = messages.filter(
+      (m): m is { command: string; modelId: string } =>
+        typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'modelChanged',
+    );
+    expect(after).toHaveLength(1);
+    expect(after[0].modelId).toBe('openai/gpt-4');
+  });
+
+  it('populates reasoning options from verbose metadata variants', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'deepseek/model' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({
+      command: 'modelsLoaded',
+      models: [
+        {
+          modelId: 'deepseek/model',
+          capabilities: { temperature: true, reasoning: true },
+          variants: {
+            low: { reasoningEffort: 'low' },
+            max: { reasoningEffort: 'max' },
+          },
+        },
+      ],
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const reasoningSelect = window.document.getElementById('f-reasoning') as HTMLSelectElement;
+    const values = Array.from(reasoningSelect.options).map((o) => o.value);
+    expect(values).toContain('low');
+    expect(values).toContain('max');
+
+    const variantSelect = window.document.getElementById('f-variant') as HTMLSelectElement;
+    const variantValues = Array.from(variantSelect.options).map((o) => o.value);
+    expect(variantValues).toContain('low');
+    expect(variantValues).toContain('max');
+  });
+
+  it('shows only the default variant when the model has no variants', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'kimi-k2.6' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({
+      command: 'modelsLoaded',
+      models: [
+        {
+          modelId: 'kimi-k2.6',
+          capabilities: { temperature: true, reasoning: true },
+          variants: {},
+        },
+      ],
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const variantSelect = window.document.getElementById('f-variant') as HTMLSelectElement;
+    const variantValues = Array.from(variantSelect.options).map((o) => o.value);
+    expect(variantValues).toEqual(['']);
+  });
+
+  it('shows only the default variant when the model metadata has no variants field', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'no-variants/model' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({
+      command: 'modelsLoaded',
+      models: [
+        {
+          modelId: 'no-variants/model',
+          capabilities: { temperature: true, reasoning: true },
+        },
+      ],
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const variantSelect = window.document.getElementById('f-variant') as HTMLSelectElement;
+    const variantValues = Array.from(variantSelect.options).map((o) => o.value);
+    expect(variantValues).toEqual(['']);
   });
 });

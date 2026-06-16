@@ -5,6 +5,7 @@
 // inside a <script> tag in a webview HTML document.
 
 import * as esbuild from 'esbuild';
+import sveltePlugin from 'esbuild-svelte';
 
 const watch = process.argv.includes('--watch');
 
@@ -32,6 +33,13 @@ const webviewConfig = {
   target: 'es2022',
   sourcemap: true,
   logLevel: 'info',
+  plugins: [
+    sveltePlugin({
+      compilerOptions: { css: 'injected' },
+    }),
+  ],
+  loader: { '.svelte': 'js' },
+  resolveExtensions: ['.svelte', '.js'],
 };
 
 const configs = [extensionConfig, webviewConfig];

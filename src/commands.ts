@@ -68,7 +68,7 @@ export function registerCommands(
           );
           return;
         }
-        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, {
+        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, treeProvider, {
           type: 'agent',
           name: item.nodeName,
         });
@@ -85,7 +85,7 @@ export function registerCommands(
           );
           return;
         }
-        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, {
+        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, treeProvider, {
           type: 'category',
           name: item.nodeName,
         });

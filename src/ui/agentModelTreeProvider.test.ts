@@ -65,13 +65,13 @@ vi.mock('vscode', () => {
 // ---------------------------------------------------------------------------
 
 function makeConfigStoreStub(
-  agents: Record<string, { model?: string }> = {},
-  categories: Record<string, { model?: string }> = {},
+  agents: Record<string, object> = {},
+  categories: Record<string, object> = {},
 ): ConfigStore {
   return {
     onDidChange: new EventEmitter(),
-    getAgent: (name: string) => agents[name],
-    getCategory: (name: string) => categories[name],
+    getAgent: (name: string) => agents[name] as { model?: string } | undefined,
+    getCategory: (name: string) => categories[name] as { model?: string } | undefined,
   } as unknown as ConfigStore;
 }
 
@@ -255,5 +255,119 @@ describe('AgentModelTreeProvider', () => {
   it('returns the same item from getTreeItem', () => {
     const group = provider.getChildren()![0];
     expect(provider.getTreeItem(group)).toBe(group);
+  });
+
+  describe('sidebar metadata display', () => {
+    it('shows configured params in the tooltip for an agent override', () => {
+      configStore = makeConfigStoreStub({
+        sisyphus: {
+          model: 'openai/gpt-4',
+          variant: 'max',
+          temperature: 0.7,
+          reasoningEffort: 'high',
+          thinking: { type: 'enabled', budgetTokens: 8192 },
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.tooltip).toContain('model: openai/gpt-4');
+      expect(sisyphus.tooltip).toContain('variant=max');
+      expect(sisyphus.tooltip).toContain('temperature=0.7');
+      expect(sisyphus.tooltip).toContain('reasoning=high');
+      expect(sisyphus.tooltip).toContain('thinking=enabled (8192)');
+    });
+
+    it('shows fallback model IDs in the tooltip', () => {
+      configStore = makeConfigStoreStub({
+        sisyphus: {
+          model: 'openai/gpt-4',
+          fallback_models: ['openai/gpt-4o', 'anthropic/claude-haiku'],
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.tooltip).toContain('Fallback models: openai/gpt-4o, anthropic/claude-haiku');
+    });
+
+    it('shows fallback model summary for rich object entries', () => {
+      configStore = makeConfigStoreStub({
+        sisyphus: {
+          model: 'openai/gpt-4',
+          fallback_models: [
+            { model: 'openai/gpt-4o', temperature: 0.3 },
+            { model: 'anthropic/claude-opus' },
+          ],
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.tooltip).toContain('Fallback models: openai/gpt-4o, anthropic/claude-opus');
+    });
+
+    it('shows category params and fallbacks in the tooltip', () => {
+      configStore = makeConfigStoreStub({}, {
+        deep: {
+          model: 'deep/model',
+          top_p: 0.9,
+          maxTokens: 4096,
+          disable: true,
+          fallback_models: 'fallback/model',
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const group = provider.getChildren()!.find((g) => g.group === 'categories')!;
+      const deep = provider.getChildren(group).find((l) => l.nodeName === 'deep')!;
+      expect(deep.tooltip).toContain('model: deep/model');
+      expect(deep.tooltip).toContain('top_p=0.9');
+      expect(deep.tooltip).toContain('maxTokens=4096');
+      expect(deep.tooltip).toContain('disabled');
+      expect(deep.tooltip).toContain('Fallback models: fallback/model');
+    });
+  });
+
+  describe('transient model preview', () => {
+    it('overrides the displayed model without mutating config', () => {
+      configStore = makeConfigStoreStub({
+        sisyphus: { model: 'openai/gpt-4' },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
+
+      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.label).toBe('sisyphus \u2192 openai/gpt-5');
+      expect(configStore.getAgent('sisyphus')?.model).toBe('openai/gpt-4');
+    });
+
+    it('clears a preview and reverts to the saved model', () => {
+      configStore = makeConfigStoreStub({
+        sisyphus: { model: 'openai/gpt-4' },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
+      provider.clearPreview('agents', 'sisyphus');
+
+      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.label).toBe('sisyphus \u2192 openai/gpt-4');
+    });
+
+    it('fires onDidChangeTreeData when a preview is set', () => {
+      const seen: number[] = [];
+      provider.onDidChangeTreeData(() => seen.push(1));
+      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
+      expect(seen).toHaveLength(1);
+    });
+
+    it('fires onDidChangeTreeData when previews are cleared', () => {
+      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
+      const seen: number[] = [];
+      provider.onDidChangeTreeData(() => seen.push(1));
+      provider.clearAllPreviews();
+      expect(seen).toHaveLength(1);
+    });
   });
 });

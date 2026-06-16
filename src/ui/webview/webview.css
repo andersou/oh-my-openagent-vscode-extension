@@ -217,6 +217,36 @@ code {
   padding: 6px 8px;
 }
 
+.field__model-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.field__model-row .field__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vscode-button--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  flex: 0 0 auto;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border-color: var(--vscode-button-border, transparent);
+}
+
+.vscode-button--icon:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.vscode-button--icon svg {
+  display: block;
+}
+
 .field__input::placeholder {
   color: var(--vscode-input-placeholderForeground);
   opacity: 1;
@@ -241,6 +271,109 @@ code {
 .field__input.is-invalid {
   border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
   outline-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+}
+
+.field__input--disabled,
+.field__input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--vscode-input-background);
+}
+
+.fallback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fallback-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 3px;
+}
+
+.fallback-card__row {
+  display: grid;
+  grid-template-columns: 1fr 140px 140px;
+  gap: 8px;
+  align-items: end;
+}
+
+.fallback-card__row--sampling {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.fallback-card__row--thinking {
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+}
+
+.fallback-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.fallback-card__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vscode-descriptionForeground);
+}
+
+.fallback-card__remove {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+
+.fallback-card__remove:hover {
+  color: var(--vscode-errorForeground);
+  border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+}
+
+.fallback-card__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+}
+
+.fallback-card .field {
+  min-width: 0;
+}
+
+.fallback-card .field__input {
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.fallback-empty {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  padding: 4px 2px;
+}
+
+@media (max-width: 520px) {
+  .fallback-card__row,
+  .fallback-card__row--sampling,
+  .fallback-card__row--thinking {
+    grid-template-columns: 1fr;
+  }
 }
 
 .field__hint {

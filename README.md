@@ -72,8 +72,11 @@ The sidebar shows three collapsible groups:
 
 1. Hover over the agent or category and click the pencil inline action, or right-click and choose `Edit Agent` / `Edit Category`. Both built-in items and existing override items can be edited.
 2. The webview editor opens with sections for Model, Sampling, Thinking, and Fallback models.
-3. The Model field is a free-form text input with a lazy datalist. While the editor loads, the extension runs `opencode models` locally and offers the returned model IDs as autocomplete suggestions. Any existing model value is preserved, even if it is not in the discovered list.
-4. Change values and click **Save**. The active config is updated with JSONC preservation. Fields that exist in the config but are not exposed in the form (such as `permission`, `tools`, `prompt`, `providerOptions`, and rich `fallback_models`) are preserved rather than overwritten.
+3. The Model field is a free-form text input with a lazy datalist. While the editor loads, the extension runs `opencode models --verbose` locally and offers the returned model IDs as autocomplete suggestions, together with each model's capabilities and variants. Any existing model value is preserved, even if it is not in the discovered list.
+4. Hover over the reload button next to the Model field to re-run discovery and refresh the model list at any time.
+5. As you change the Model value, the corresponding sidebar leaf updates immediately to show the new model before you save.
+6. Change values and click **Save**. The active config is updated with JSONC preservation. Fields that exist in the config but are not exposed in the form (such as `permission`, `tools`, `prompt`, `providerOptions`, and rich `fallback_models`) are preserved rather than overwritten.
+7. Hover over any agent or category leaf in the sidebar to see a tooltip with the configured parameters (temperature, top-p, max tokens, reasoning effort, thinking budget, variant, and fallback models).
 
 ### Context menu actions
 

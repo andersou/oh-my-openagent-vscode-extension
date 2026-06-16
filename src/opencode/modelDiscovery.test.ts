@@ -44,6 +44,11 @@ const FULL_OUTPUT = [
   'openai/gpt-4.1-nano',
 ].join('\n');
 
+/** Minimal valid verbose metadata for one model. */
+function verboseMeta(capabilities: Record<string, unknown> = {}, variants: Record<string, unknown> = {}): string {
+  return JSON.stringify({ id: 'ignored', capabilities, variants });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -324,6 +329,219 @@ describe('ModelDiscovery', () => {
       expect(r2).toBeDefined();
       expect(r2.models).toBeDefined();
       expect(r2.source).toBeDefined();
+    });
+  });
+
+  describe('discoverModels() — verbose mode', () => {
+    it('runs opencode models --verbose when verbose is true', async () => {
+      const { executor, calls } = stubProcessResult({
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      await discovery.discoverModels({ verbose: true });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].command).toBe('opencode');
+      expect(calls[0].args).toEqual(['models', '--verbose']);
+    });
+
+    it('parses capabilities and variants from verbose output', async () => {
+      const stdout = [
+        'openai/gpt-4.1',
+        verboseMeta({ temperature: true, reasoning: true }, { max: { reasoningEffort: 'max' } }),
+        'anthropic/claude-haiku',
+        verboseMeta({ temperature: false }, { low: { reasoningEffort: 'low' } }),
+      ].join('\n');
+      const { executor } = stubProcessResult({ stdout, stderr: '', exitCode: 0 });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const result = await discovery.discoverModels({ verbose: true });
+      expect(result.models).toHaveLength(2);
+
+      const gpt = result.models[0];
+      expect(gpt.modelId).toBe('openai/gpt-4.1');
+      expect(gpt.capabilities).toEqual({ temperature: true, reasoning: true });
+      expect(gpt.variants).toEqual({ max: { reasoningEffort: 'max' } });
+
+      const haiku = result.models[1];
+      expect(haiku.modelId).toBe('anthropic/claude-haiku');
+      expect(haiku.capabilities).toEqual({ temperature: false });
+      expect(haiku.variants).toEqual({ low: { reasoningEffort: 'low' } });
+    });
+
+    it('keeps the model ID when metadata JSON is malformed', async () => {
+      const stdout = [
+        'openai/gpt-4.1',
+        '{ "capabilities": { "temperature": true }',
+      ].join('\n');
+      const { executor } = stubProcessResult({ stdout, stderr: '', exitCode: 0 });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const result = await discovery.discoverModels({ verbose: true });
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0].modelId).toBe('openai/gpt-4.1');
+      expect(result.models[0].capabilities).toBeUndefined();
+    });
+
+    it('keeps a trailing model whose JSON block is missing', async () => {
+      const stdout = [
+        'openai/gpt-4.1',
+        verboseMeta({ temperature: true }),
+        'anthropic/claude-haiku',
+      ].join('\n');
+      const { executor } = stubProcessResult({ stdout, stderr: '', exitCode: 0 });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const result = await discovery.discoverModels({ verbose: true });
+      expect(result.models).toHaveLength(2);
+      expect(result.models[0].modelId).toBe('openai/gpt-4.1');
+      expect(result.models[0].capabilities?.temperature).toBe(true);
+      expect(result.models[1].modelId).toBe('anthropic/claude-haiku');
+      expect(result.models[1].capabilities).toBeUndefined();
+    });
+
+    it('deduplicates verbose models preserving first occurrence', async () => {
+      const stdout = [
+        'openai/gpt-4.1',
+        verboseMeta({ temperature: true }),
+        'openai/gpt-4.1',
+        verboseMeta({ temperature: false }),
+      ].join('\n');
+      const { executor } = stubProcessResult({ stdout, stderr: '', exitCode: 0 });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const result = await discovery.discoverModels({ verbose: true });
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0].modelId).toBe('openai/gpt-4.1');
+      expect(result.models[0].capabilities?.temperature).toBe(true);
+    });
+
+    it('parses real-world verbose output with multi-line JSON containing string keys', async () => {
+      const stdout = [
+        'opencode/big-pickle',
+        '{',
+        '  "id": "big-pickle",',
+        '  "providerID": "opencode",',
+        '  "capabilities": {',
+        '    "temperature": true,',
+        '    "reasoning": true,',
+        '    "toolcall": true',
+        '  },',
+        '  "variants": {}',
+        '}',
+        'opencode/deepseek-v4-flash-free',
+        '{',
+        '  "id": "deepseek-v4-flash-free",',
+        '  "capabilities": {',
+        '    "temperature": true,',
+        '    "reasoning": true',
+        '  },',
+        '  "variants": {',
+        '    "low": { "reasoningEffort": "low" },',
+        '    "max": { "reasoningEffort": "max" }',
+        '  }',
+        '}',
+      ].join('\n');
+      const { executor } = stubProcessResult({ stdout, stderr: '', exitCode: 0 });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const result = await discovery.discoverModels({ verbose: true });
+      expect(result.models).toHaveLength(2);
+      expect(result.models[0].modelId).toBe('opencode/big-pickle');
+      expect(result.models[0].capabilities?.temperature).toBe(true);
+      expect(result.models[0].capabilities?.reasoning).toBe(true);
+      expect(result.models[0].variants).toEqual({});
+      expect(result.models[1].modelId).toBe('opencode/deepseek-v4-flash-free');
+      expect(result.models[1].variants).toEqual({
+        low: { reasoningEffort: 'low' },
+        max: { reasoningEffort: 'max' },
+      });
+    });
+
+    it('does not treat JSON string-key lines as model IDs', async () => {
+      const stdout = [
+        'openai/gpt-4',
+        '{',
+        '  "id": "gpt-4",',
+        '  "capabilities": { "temperature": false, "reasoning": true },',
+        '  "variants": { "low": { "reasoningEffort": "low" } }',
+        '}',
+      ].join('\n');
+      const { executor } = stubProcessResult({ stdout, stderr: '', exitCode: 0 });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const result = await discovery.discoverModels({ verbose: true });
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0].modelId).toBe('openai/gpt-4');
+      expect(result.models[0].capabilities).toEqual({
+        temperature: false,
+        reasoning: true,
+      });
+      expect(result.models[0].variants).toEqual({
+        low: { reasoningEffort: 'low' },
+      });
+    });
+  });
+
+  describe('discoverModels() — caching', () => {
+    it('returns the same result on subsequent calls without re-invoking the executor', async () => {
+      const { executor, calls } = stubProcessResult({
+        stdout: FULL_OUTPUT,
+        stderr: '',
+        exitCode: 0,
+      });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const r1 = await discovery.discoverModels();
+      const r2 = await discovery.discoverModels();
+      expect(r1.models).toEqual(r2.models);
+      expect(calls).toHaveLength(1);
+    });
+
+    it('caches verbose and non-verbose results independently', async () => {
+      const { executor, calls } = stubProcessResult({
+        stdout: FULL_OUTPUT,
+        stderr: '',
+        exitCode: 0,
+      });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      await discovery.discoverModels();
+      await discovery.discoverModels({ verbose: true });
+      await discovery.discoverModels();
+      expect(calls).toHaveLength(2);
+      expect(calls[0].args).toEqual(['models']);
+      expect(calls[1].args).toEqual(['models', '--verbose']);
+    });
+
+    it('bypasses cache when forceRefresh is true', async () => {
+      const { executor, calls } = stubProcessResult({
+        stdout: FULL_OUTPUT,
+        stderr: '',
+        exitCode: 0,
+      });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      await discovery.discoverModels();
+      await discovery.discoverModels({ forceRefresh: true });
+      expect(calls).toHaveLength(2);
+    });
+
+    it('re-invokes verbose discovery when forceRefresh is true', async () => {
+      const { executor, calls } = stubProcessResult({
+        stdout: FULL_OUTPUT,
+        stderr: '',
+        exitCode: 0,
+      });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      await discovery.discoverModels({ verbose: true });
+      await discovery.discoverModels({ verbose: true, forceRefresh: true });
+      expect(calls).toHaveLength(2);
+    });
+
+    it('does not cache fallback results across different instances', async () => {
+      const { executor } = stubProcessResult({
+        stdout: '',
+        stderr: 'broken',
+        exitCode: 1,
+      });
+      const discovery = new ModelDiscovery(executor, '/tmp');
+      const r1 = await discovery.discoverModels();
+      const r2 = await discovery.discoverModels();
+      expect(r1.source).toBe('fallback');
+      expect(r2.source).toBe('fallback');
     });
   });
 });

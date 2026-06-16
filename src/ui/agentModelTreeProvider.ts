@@ -5,6 +5,7 @@ import {
   BUILTIN_AGENTS,
   BUILTIN_CATEGORIES,
 } from '../config/schema.js';
+import type { AgentConfig, CategoryConfig, FallbackModels } from '../config/schema.js';
 
 // ---------------------------------------------------------------------------
 // Item shape
@@ -36,6 +37,11 @@ export interface AgentModelTreeItem extends vscode.TreeItem {
   group?: AgentModelGroupKind;
   /** Stable identifier for the underlying config / profile entry. */
   nodeName?: string;
+}
+
+/** Transient preview of a model override shown before the user saves. */
+interface ModelPreview {
+  model: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +90,9 @@ export class AgentModelTreeProvider
   /** Backing tree view, set by the caller after `createTreeView`. */
   private view: vscode.TreeView<AgentModelTreeItem> | undefined;
 
+  /** In-memory previews keyed by group:nodeName, updated by the editor. */
+  private readonly previews = new Map<string, ModelPreview>();
+
   constructor(
     private readonly configStore: ConfigStore,
     private readonly profileStore: ProfileStore,
@@ -105,6 +114,36 @@ export class AgentModelTreeProvider
   /** Fire `onDidChangeTreeData` so VS Code re-queries `getChildren()`. */
   refresh(): void {
     this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * Set a transient model preview for a leaf. The preview overrides the
+   * displayed model in the tree until it is cleared by `clearPreview`, a
+   * config change, or provider disposal. Used by the editor to show the
+   * selected model before the user clicks Save.
+   */
+  setPreview(
+    group: Exclude<AgentModelGroupKind, 'profiles'>,
+    nodeName: string,
+    model: string,
+  ): void {
+    this.previews.set(`${group}:${nodeName}`, { model });
+    this.refresh();
+  }
+
+  /** Remove any transient preview for the given leaf. */
+  clearPreview(
+    group: Exclude<AgentModelGroupKind, 'profiles'>,
+    nodeName: string,
+  ): void {
+    this.previews.delete(`${group}:${nodeName}`);
+    this.refresh();
+  }
+
+  /** Remove all transient previews. */
+  clearAllPreviews(): void {
+    this.previews.clear();
+    this.refresh();
   }
 
   /**
@@ -185,28 +224,32 @@ export class AgentModelTreeProvider
   private createAgentLeaf(name: string): AgentModelTreeItem {
     const override = this.configStore.getAgent(name);
     const hasOverride = override !== undefined;
+    const preview = this.previews.get(`agents:${name}`);
+    const effectiveModel = preview?.model ?? override?.model;
     return this.createLeaf({
       group: 'agents',
       kind: hasOverride ? 'override' : 'agent',
       name,
-      label: this.formatModelLabel(name, override?.model),
+      label: this.formatModelLabel(name, effectiveModel),
       contextValue: hasOverride ? 'agentOverride' : 'agent',
       icon: hasOverride ? 'edit' : 'person',
-      tooltip: this.formatTooltip(name, override?.model),
+      tooltip: this.formatTooltip(name, effectiveModel, override),
     });
   }
 
   private createCategoryLeaf(name: string): AgentModelTreeItem {
     const override = this.configStore.getCategory(name);
     const hasOverride = override !== undefined;
+    const preview = this.previews.get(`categories:${name}`);
+    const effectiveModel = preview?.model ?? override?.model;
     return this.createLeaf({
       group: 'categories',
       kind: hasOverride ? 'override' : 'category',
       name,
-      label: this.formatModelLabel(name, override?.model),
+      label: this.formatModelLabel(name, effectiveModel),
       contextValue: hasOverride ? 'categoryOverride' : 'category',
       icon: hasOverride ? 'edit' : 'tag',
-      tooltip: this.formatTooltip(name, override?.model),
+      tooltip: this.formatTooltip(name, effectiveModel, override),
     });
   }
 
@@ -260,10 +303,79 @@ export class AgentModelTreeProvider
     return `${name} \u2192 ${model ?? 'default'}`;
   }
 
-  private formatTooltip(name: string, model: string | undefined): string {
-    return model
-      ? `${name} \u2014 model: ${model}`
-      : `${name} \u2014 using default model`;
+  private formatTooltip(
+    name: string,
+    model: string | undefined,
+    override: AgentConfig | CategoryConfig | undefined,
+  ): string {
+    const lines: string[] = [
+      model ? `${name} — model: ${model}` : `${name} — using default model`,
+    ];
+
+    const params = this.formatParams(override);
+    if (params.length > 0) {
+      lines.push('');
+      lines.push(params);
+    }
+
+    const fallbackSummary = this.formatFallbackSummary(override?.fallback_models);
+    if (fallbackSummary !== undefined) {
+      lines.push('');
+      lines.push(`Fallback models: ${fallbackSummary}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatParams(
+    override: AgentConfig | CategoryConfig | undefined,
+  ): string {
+    if (!override) return '';
+    const parts: string[] = [];
+
+    if (override.variant !== undefined) parts.push(`variant=${override.variant}`);
+    if (override.temperature !== undefined) {
+      parts.push(`temperature=${override.temperature}`);
+    }
+    if (override.top_p !== undefined) parts.push(`top_p=${override.top_p}`);
+    if (override.maxTokens !== undefined) {
+      parts.push(`maxTokens=${override.maxTokens}`);
+    }
+    if (override.reasoningEffort !== undefined) {
+      parts.push(`reasoning=${override.reasoningEffort}`);
+    }
+    if (override.thinking !== undefined) {
+      const thinking =
+        override.thinking.type === 'enabled'
+          ? override.thinking.budgetTokens !== undefined
+            ? `enabled (${override.thinking.budgetTokens})`
+            : 'enabled'
+          : 'disabled';
+      parts.push(`thinking=${thinking}`);
+    }
+    if (override.textVerbosity !== undefined) {
+      parts.push(`verbosity=${override.textVerbosity}`);
+    }
+    if (override.disable === true) parts.push('disabled');
+
+    return parts.join(', ');
+  }
+
+  private formatFallbackSummary(fallbacks: FallbackModels | undefined): string | undefined {
+    if (fallbacks === undefined || fallbacks === null) return undefined;
+    if (typeof fallbacks === 'string') return fallbacks;
+    if (!Array.isArray(fallbacks)) return undefined;
+    if (fallbacks.length === 0) return 'none';
+
+    const ids = fallbacks.map((entry) => {
+      if (typeof entry === 'string') return entry;
+      if (entry && typeof entry === 'object' && 'model' in entry) {
+        return String(entry.model);
+      }
+      return '(unknown)';
+    });
+
+    return ids.join(', ');
   }
 
   private groupIcon(group: AgentModelGroupKind): string {

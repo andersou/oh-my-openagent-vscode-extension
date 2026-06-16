@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // vscode mock — must be set up before importing the panel module.
@@ -25,6 +25,21 @@ vi.mock('vscode', () => {
   return {
     Disposable,
     EventEmitter,
+    TreeItem: class {
+      label: string | undefined;
+      collapsibleState: number;
+      constructor(label: string, collapsibleState?: number) {
+        this.label = label;
+        this.collapsibleState = collapsibleState ?? 0;
+      }
+    },
+    ThemeIcon: class {
+      readonly id: string;
+      constructor(id: string) {
+        this.id = id;
+      }
+    },
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     Uri: {
       file: (p: string) => ({ fsPath: p, scheme: 'file', path: p }),
       parse: (u: string) => ({ scheme: 'file', path: u, fsPath: u }),
@@ -45,7 +60,16 @@ import {
   AGENT_FIELDS,
   CATEGORY_FIELDS,
 } from './agentEditorPanel.js';
+import { AgentEditorPanel } from './agentEditorPanel.js';
+import { AgentModelTreeProvider } from './agentModelTreeProvider.js';
 import type { AgentConfig, CategoryConfig } from '../config/schema.js';
+import type { ConfigStore } from '../config/configStore.js';
+import type { ProfileStore } from '../config/profileStore.js';
+import type { ModelDiscovery } from '../opencode/modelDiscovery.js';
+import { EventEmitter } from 'node:events';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as vscode from 'vscode';
 
 function getNullKeys(raw: unknown): Set<string> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -463,7 +487,246 @@ describe('validateAndClean', () => {
       { temperature: 'warm' } as unknown as Record<string, unknown>,
       AGENT_FIELDS,
     );
-    // Non-numeric temperature is not clamped — passed through as-is
     expect(result).toHaveProperty('temperature');
+  });
+});
+
+function makeMockWebviewPanel() {
+  const messages: unknown[] = [];
+  const listeners: Array<(e: unknown) => void> = [];
+  const disposeListeners: Array<() => void> = [];
+  let disposed = false;
+
+  const webview = {
+    postMessage: (msg: unknown) => {
+      messages.push(msg);
+      return Promise.resolve(true);
+    },
+    onDidReceiveMessage: (fn: (e: unknown) => void) => {
+      listeners.push(fn);
+      return { dispose: () => {} };
+    },
+    asWebviewUri: (uri: { toString: () => string }) => ({ toString: () => uri.toString() }),
+    cspSource: 'self',
+  };
+
+  const panel = {
+    webview,
+    title: '',
+    onDidDispose: (fn: () => void) => {
+      disposeListeners.push(fn);
+      return { dispose: () => {} };
+    },
+    reveal: () => {},
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      for (const fn of disposeListeners) fn();
+    },
+  };
+
+  function sendReady(): void {
+    for (const listener of listeners) {
+      listener({ command: 'ready' });
+    }
+  }
+
+  return { panel, webview, messages, listeners, disposeListeners, sendReady };
+}
+
+function makeMockConfigStore(): ConfigStore {
+  const emitter = new EventEmitter();
+  let agents: Record<string, AgentConfig> = {};
+  return {
+    onDidChange: emitter,
+    getAgent: (name: string) => agents[name],
+    getCategory: () => undefined,
+    updateConfig: async (updater: (draft: { agents?: Record<string, AgentConfig> }) => void) => {
+      const draft = { agents: { ...agents } };
+      updater(draft);
+      agents = draft.agents ?? {};
+      emitter.emit('change');
+    },
+  } as unknown as ConfigStore;
+}
+
+function makeMockProfileStore(): ProfileStore {
+  return {
+    onDidChange: new EventEmitter(),
+    listProfiles: () => [],
+    getActiveProfileName: () => undefined,
+  } as unknown as ProfileStore;
+}
+
+function makeMockModelDiscovery(): ModelDiscovery {
+  return {
+    discoverModels: vi.fn().mockResolvedValue({
+      models: [{ modelId: 'openai/gpt-4' }],
+      source: 'cli',
+    }),
+  } as unknown as ModelDiscovery;
+}
+
+function makeExtensionContext(extensionPath: string) {
+  return {
+    extensionPath,
+    subscriptions: [],
+  } as unknown as import('vscode').ExtensionContext;
+}
+
+describe('AgentEditorPanel integration', () => {
+  let extensionPath: string;
+
+  beforeEach(() => {
+    extensionPath = fs.mkdtempSync('/tmp/omo-panel-test-');
+    fs.mkdirSync(path.join(extensionPath, 'out'), { recursive: true });
+    fs.mkdirSync(path.join(extensionPath, 'src', 'ui', 'webview'), { recursive: true });
+    fs.writeFileSync(path.join(extensionPath, 'src', 'ui', 'webview', 'webview.html'), '<html></html>');
+    fs.writeFileSync(path.join(extensionPath, 'src', 'ui', 'webview', 'webview.css'), '');
+    AgentEditorPanel.currentPanel = undefined;
+  });
+
+  afterEach(() => {
+    fs.rmSync(extensionPath, { recursive: true, force: true });
+  });
+
+  it('loads model IDs first, then capabilities in the background', async () => {
+    const { panel, sendReady, messages } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    sendReady();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(vi.mocked(modelDiscovery.discoverModels)).toHaveBeenCalledWith({ verbose: false, forceRefresh: false });
+    expect(vi.mocked(modelDiscovery.discoverModels)).toHaveBeenCalledWith({ verbose: true, forceRefresh: false });
+
+    const loadedMessages = messages.filter(
+      (m): m is { command: string; models: Array<{ modelId: string }> } =>
+        typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'modelsLoaded',
+    );
+    expect(loadedMessages.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('forces refresh when reloadModels is received', async () => {
+    const { panel, listeners } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    vi.mocked(modelDiscovery.discoverModels).mockClear();
+
+    for (const listener of listeners) {
+      listener({ command: 'reloadModels' });
+    }
+    await new Promise((r) => setTimeout(r, 10));
+
+    const calls = vi.mocked(modelDiscovery.discoverModels).mock.calls;
+    expect(calls).toContainEqual([{ verbose: false, forceRefresh: true }]);
+    expect(calls).toContainEqual([{ verbose: true, forceRefresh: true }]);
+  });
+
+  it('sets a tree preview when modelChanged is received', async () => {
+    const { panel, listeners } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    const setPreviewSpy = vi.spyOn(treeProvider, 'setPreview');
+
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    for (const listener of listeners) {
+      listener({ command: 'modelChanged', modelId: 'openai/gpt-5' });
+    }
+
+    expect(setPreviewSpy).toHaveBeenCalledWith('agents', 'sisyphus', 'openai/gpt-5');
+  });
+
+  it('clears the tree preview after a successful save', async () => {
+    const { panel, listeners } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    const clearPreviewSpy = vi.spyOn(treeProvider, 'clearPreview');
+
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    for (const listener of listeners) {
+      await listener({ command: 'save', payload: { model: 'openai/gpt-5' } });
+    }
+
+    expect(clearPreviewSpy).toHaveBeenCalledWith('agents', 'sisyphus');
+  });
+
+  it('clears the tree preview when the panel is disposed', async () => {
+    const { panel, disposeListeners } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    const clearPreviewSpy = vi.spyOn(treeProvider, 'clearPreview');
+
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    for (const fn of disposeListeners) {
+      fn();
+    }
+
+    expect(clearPreviewSpy).toHaveBeenCalledWith('agents', 'sisyphus');
   });
 });

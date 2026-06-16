@@ -22,6 +22,7 @@ import type { ProfileStore } from '../config/profileStore.js';
 import type { AgentConfig, CategoryConfig } from '../config/schema.js';
 import { BUILTIN_AGENTS, BUILTIN_CATEGORIES } from '../config/schema.js';
 import type { ModelDiscovery } from '../opencode/modelDiscovery.js';
+import type { AgentModelTreeProvider } from './agentModelTreeProvider.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -165,6 +166,7 @@ export class AgentEditorPanel implements vscode.Disposable {
   private readonly _configStore: ConfigStore;
   private readonly _profileStore: ProfileStore;
   private readonly _modelDiscovery: ModelDiscovery;
+  private readonly _treeProvider: AgentModelTreeProvider;
   private readonly _extensionPath: string;
   private _item: EditorItem;
   private readonly _disposables: vscode.Disposable[] = [];
@@ -175,6 +177,7 @@ export class AgentEditorPanel implements vscode.Disposable {
     configStore: ConfigStore,
     profileStore: ProfileStore,
     modelDiscovery: ModelDiscovery,
+    treeProvider: AgentModelTreeProvider,
     item: EditorItem,
   ) {
     this._panel = panel;
@@ -182,6 +185,7 @@ export class AgentEditorPanel implements vscode.Disposable {
     this._configStore = configStore;
     this._profileStore = profileStore;
     this._modelDiscovery = modelDiscovery;
+    this._treeProvider = treeProvider;
     this._item = item;
 
     this._panel.title = AgentEditorPanel._titleFor(item);
@@ -211,6 +215,7 @@ export class AgentEditorPanel implements vscode.Disposable {
     configStore: ConfigStore,
     profileStore: ProfileStore,
     modelDiscovery: ModelDiscovery,
+    treeProvider: AgentModelTreeProvider,
     item: EditorItem,
   ): void {
     const column = vscode.window.activeTextEditor?.viewColumn;
@@ -241,6 +246,7 @@ export class AgentEditorPanel implements vscode.Disposable {
       configStore,
       profileStore,
       modelDiscovery,
+      treeProvider,
       item,
     );
     AgentEditorPanel.currentPanel = instance;
@@ -251,6 +257,7 @@ export class AgentEditorPanel implements vscode.Disposable {
     if (AgentEditorPanel.currentPanel === this) {
       AgentEditorPanel.currentPanel = undefined;
     }
+    this._clearCurrentPreview();
     this._panel.dispose();
     while (this._disposables.length > 0) {
       const d = this._disposables.pop();
@@ -258,6 +265,13 @@ export class AgentEditorPanel implements vscode.Disposable {
         d.dispose();
       }
     }
+  }
+
+  private _clearCurrentPreview(): void {
+    this._treeProvider.clearPreview(
+      this._item.type === 'agent' ? 'agents' : 'categories',
+      this._item.name,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -271,11 +285,10 @@ export class AgentEditorPanel implements vscode.Disposable {
 
   /** Switch the panel to a different item and refresh the HTML. */
   private _switchItem(item: EditorItem): void {
+    this._clearCurrentPreview();
     this._item = item;
     this._panel.title = AgentEditorPanel._titleFor(item);
     this._panel.webview.html = this._renderHtml();
-    // The new HTML triggers a fresh script execution; init is re-sent when
-    // the webview's `ready` message arrives.
   }
 
   private _renderHtml(): string {
@@ -327,24 +340,29 @@ export class AgentEditorPanel implements vscode.Disposable {
     });
   }
 
-  private _startModelDiscovery(): void {
+  private _startModelDiscovery(forceRefresh = false): void {
     this._panel.webview.postMessage({ command: 'modelsLoading' });
 
     void (async () => {
       try {
-        const result = await this._modelDiscovery.discoverModels();
+        const idsResult = await this._modelDiscovery.discoverModels({
+          verbose: false,
+          forceRefresh,
+        });
         if (this._panel.webview === undefined) return;
-        if (result.source === 'fallback') {
+        if (idsResult.source === 'fallback') {
           this._panel.webview.postMessage({
             command: 'modelsUnavailable',
-            error: result.error,
+            error: idsResult.error,
           });
-        } else {
-          this._panel.webview.postMessage({
-            command: 'modelsLoaded',
-            models: result.models,
-          });
+          return;
         }
+        this._panel.webview.postMessage({
+          command: 'modelsLoaded',
+          models: idsResult.models.map((m) => ({ modelId: m.modelId })),
+        });
+
+        void this._loadCapabilitiesInBackground(forceRefresh);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         try {
@@ -357,6 +375,25 @@ export class AgentEditorPanel implements vscode.Disposable {
         }
       }
     })();
+  }
+
+  private async _loadCapabilitiesInBackground(forceRefresh: boolean): Promise<void> {
+    try {
+      const verboseResult = await this._modelDiscovery.discoverModels({
+        verbose: true,
+        forceRefresh,
+      });
+      if (this._panel.webview === undefined) return;
+      if (verboseResult.source === 'fallback') {
+        return;
+      }
+      this._panel.webview.postMessage({
+        command: 'modelsLoaded',
+        models: verboseResult.models,
+      });
+    } catch {
+      // best-effort
+    }
   }
 
   private async _handleMessage(message: unknown): Promise<void> {
@@ -382,6 +419,17 @@ export class AgentEditorPanel implements vscode.Disposable {
     }
     if (command === 'createProfile') {
       await this._handleCreateProfile();
+      return;
+    }
+    if (command === 'reloadModels') {
+      this._startModelDiscovery(true);
+      return;
+    }
+    if (command === 'modelChanged') {
+      const modelId = (msg as { modelId?: unknown }).modelId;
+      if (typeof modelId === 'string' && modelId.length > 0) {
+        this._treeProvider.setPreview(this._item.type === 'agent' ? 'agents' : 'categories', this._item.name, modelId);
+      }
       return;
     }
     // Unknown command: ignore silently.
@@ -428,6 +476,7 @@ export class AgentEditorPanel implements vscode.Disposable {
         });
       }
 
+      this._clearCurrentPreview();
       this._panel.webview.postMessage({ command: 'saved' });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Save failed';
