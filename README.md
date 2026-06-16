@@ -5,6 +5,7 @@ A VS Code companion extension for Oh My OpenAgent. It gives you a visual tree of
 ## Features
 
 - **Agent and category model overrides** — see every built-in agent and category, add empty override slots, and edit them in a webview form.
+- **Lazy model picker** — the Model field is populated asynchronously from the local `opencode models` CLI, with a free-form fallback when the CLI is unavailable.
 - **JSONC preservation** — all writes go through `jsonc-parser`, so comments, trailing commas, and formatting in your config file stay intact.
 - **Profiles** — snapshot the current `agents` and `categories` sections, switch between them instantly, and keep an optional description for each.
 - **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away.
@@ -69,17 +70,18 @@ The sidebar shows three collapsible groups:
 
 ### Editing an agent or category
 
-1. Hover over the agent or category and click the pencil inline action, or right-click and choose `Edit Agent` / `Edit Category`.
+1. Hover over the agent or category and click the pencil inline action, or right-click and choose `Edit Agent` / `Edit Category`. Both built-in items and existing override items can be edited.
 2. The webview editor opens with sections for Model, Sampling, Thinking, and Fallback models.
-3. Change values and click **Save**. The active config is updated with JSONC preservation.
+3. The Model field is a free-form text input with a lazy datalist. While the editor loads, the extension runs `opencode models` locally and offers the returned model IDs as autocomplete suggestions. Any existing model value is preserved, even if it is not in the discovered list.
+4. Change values and click **Save**. The active config is updated with JSONC preservation. Fields that exist in the config but are not exposed in the form (such as `permission`, `tools`, `prompt`, `providerOptions`, and rich `fallback_models`) are preserved rather than overwritten.
 
 ### Context menu actions
 
 Right-click items in the Models view for more options:
 
-- On a built-in agent: `Add Agent Override` creates an empty override entry.
-- On a built-in category: `Add Category Override` creates an empty override entry.
-- On an override item: `Remove Override` deletes that override from the active config.
+- On a built-in agent: `Add Agent Override` creates an empty override entry, and `Edit Agent` opens the editor.
+- On a built-in category: `Add Category Override` creates an empty override entry, and `Edit Category` opens the editor.
+- On an override item: `Edit Agent` / `Edit Category` opens the editor, and `Remove Override` deletes that override from the active config.
 - On a profile: `Activate`, `Rename`, `Duplicate`, or `Delete`.
 
 The view title also provides `Refresh` and `Create Profile` buttons.
@@ -155,7 +157,7 @@ To run the extension locally, press `F5` in VS Code. This opens the Extension De
 
 ### Tests
 
-Tests are written with Vitest and cover config parsing, JSONC-preserving updates, profile lifecycle, and tree-provider rendering.
+Tests are written with Vitest and cover config parsing, JSONC-preserving updates, profile lifecycle, tree-provider rendering, the model-discovery service, and a happy-dom-based webview integration test for the lazy model picker.
 
 ```bash
 npm test

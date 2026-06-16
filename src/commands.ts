@@ -28,6 +28,7 @@ import type {
   AgentModelTreeItem,
   AgentModelTreeProvider,
 } from './ui/agentModelTreeProvider.js';
+import type { ModelDiscovery } from './opencode/modelDiscovery.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -43,6 +44,7 @@ export function registerCommands(
   configStore: ConfigStore,
   profileStore: ProfileStore,
   treeProvider: AgentModelTreeProvider,
+  modelDiscovery: ModelDiscovery,
 ): vscode.Disposable {
   const commands: vscode.Disposable[] = [
     // 1. Open the sidebar models view.
@@ -66,7 +68,7 @@ export function registerCommands(
           );
           return;
         }
-        AgentEditorPanel.show(context, configStore, profileStore, {
+        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, {
           type: 'agent',
           name: item.nodeName,
         });
@@ -83,7 +85,7 @@ export function registerCommands(
           );
           return;
         }
-        AgentEditorPanel.show(context, configStore, profileStore, {
+        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, {
           type: 'category',
           name: item.nodeName,
         });

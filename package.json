@@ -103,12 +103,12 @@
       "view/item/context": [
         {
           "command": "ohMyOpenAgent.editAgent",
-          "when": "view == ohMyOpenAgent.models && viewItem == agent",
+          "when": "view == ohMyOpenAgent.models && (viewItem == agent || viewItem == agentOverride)",
           "group": "inline"
         },
         {
           "command": "ohMyOpenAgent.editCategory",
-          "when": "view == ohMyOpenAgent.models && viewItem == category",
+          "when": "view == ohMyOpenAgent.models && (viewItem == category || viewItem == categoryOverride)",
           "group": "inline"
         },
         {
@@ -123,7 +123,7 @@
         },
         {
           "command": "ohMyOpenAgent.removeOverride",
-          "when": "view == ohMyOpenAgent.models && viewItem == override",
+          "when": "view == ohMyOpenAgent.models && (viewItem == agentOverride || viewItem == categoryOverride)",
           "group": "override"
         },
         {
@@ -175,8 +175,9 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.21.5",
+    "happy-dom": "^20.10.4",
     "typescript": "^5.4.5",
-    "vsce": "^2.15.0",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "vsce": "^2.15.0"
   }
 }

@@ -21,6 +21,7 @@ import type { ConfigStore } from '../config/configStore.js';
 import type { ProfileStore } from '../config/profileStore.js';
 import type { AgentConfig, CategoryConfig } from '../config/schema.js';
 import { BUILTIN_AGENTS, BUILTIN_CATEGORIES } from '../config/schema.js';
+import type { ModelDiscovery } from '../opencode/modelDiscovery.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -36,7 +37,7 @@ export type EditorItem =
 // ---------------------------------------------------------------------------
 
 /** Allow-list of editable fields for an agent override. */
-const AGENT_FIELDS: ReadonlySet<string> = new Set<keyof AgentConfig>([
+export const AGENT_FIELDS: ReadonlySet<string> = new Set<keyof AgentConfig>([
   'model',
   'variant',
   'fallback_models',
@@ -58,7 +59,7 @@ const AGENT_FIELDS: ReadonlySet<string> = new Set<keyof AgentConfig>([
 ]);
 
 /** Allow-list of editable fields for a category override. */
-const CATEGORY_FIELDS: ReadonlySet<string> = new Set<keyof CategoryConfig>([
+export const CATEGORY_FIELDS: ReadonlySet<string> = new Set<keyof CategoryConfig>([
   'model',
   'variant',
   'fallback_models',
@@ -99,7 +100,7 @@ function escapeHtml(text: string): string {
  *     the downstream diff produces a removal patch in jsonc-parser).
  *   - Clamp `temperature` to [0, 2] when numeric.
  */
-function validateAndClean<T extends object>(
+export function validateAndClean<T extends object>(
   raw: unknown,
   allowedFields: ReadonlySet<string>,
 ): T {
@@ -129,6 +130,26 @@ function validateAndClean<T extends object>(
   return cleaned as T;
 }
 
+/**
+ * Collect which top-level keys in the raw payload are explicitly set to
+ * `null`. These keys must be deleted from the existing config during a
+ * merge-based save so that the user can clear a previously-set field.
+ */
+function getNullKeys(raw: unknown): Set<string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return new Set();
+  }
+  const nullKeys = new Set<string>();
+  for (const [key, value] of Object.entries(
+    raw as Record<string, unknown>,
+  )) {
+    if (value === null) {
+      nullKeys.add(key);
+    }
+  }
+  return nullKeys;
+}
+
 // ---------------------------------------------------------------------------
 // AgentEditorPanel
 // ---------------------------------------------------------------------------
@@ -143,6 +164,7 @@ export class AgentEditorPanel implements vscode.Disposable {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _configStore: ConfigStore;
   private readonly _profileStore: ProfileStore;
+  private readonly _modelDiscovery: ModelDiscovery;
   private readonly _extensionPath: string;
   private _item: EditorItem;
   private readonly _disposables: vscode.Disposable[] = [];
@@ -152,12 +174,14 @@ export class AgentEditorPanel implements vscode.Disposable {
     extensionPath: string,
     configStore: ConfigStore,
     profileStore: ProfileStore,
+    modelDiscovery: ModelDiscovery,
     item: EditorItem,
   ) {
     this._panel = panel;
     this._extensionPath = extensionPath;
     this._configStore = configStore;
     this._profileStore = profileStore;
+    this._modelDiscovery = modelDiscovery;
     this._item = item;
 
     this._panel.title = AgentEditorPanel._titleFor(item);
@@ -186,6 +210,7 @@ export class AgentEditorPanel implements vscode.Disposable {
     context: vscode.ExtensionContext,
     configStore: ConfigStore,
     profileStore: ProfileStore,
+    modelDiscovery: ModelDiscovery,
     item: EditorItem,
   ): void {
     const column = vscode.window.activeTextEditor?.viewColumn;
@@ -215,6 +240,7 @@ export class AgentEditorPanel implements vscode.Disposable {
       context.extensionPath,
       configStore,
       profileStore,
+      modelDiscovery,
       item,
     );
     AgentEditorPanel.currentPanel = instance;
@@ -301,6 +327,38 @@ export class AgentEditorPanel implements vscode.Disposable {
     });
   }
 
+  private _startModelDiscovery(): void {
+    this._panel.webview.postMessage({ command: 'modelsLoading' });
+
+    void (async () => {
+      try {
+        const result = await this._modelDiscovery.discoverModels();
+        if (this._panel.webview === undefined) return;
+        if (result.source === 'fallback') {
+          this._panel.webview.postMessage({
+            command: 'modelsUnavailable',
+            error: result.error,
+          });
+        } else {
+          this._panel.webview.postMessage({
+            command: 'modelsLoaded',
+            models: result.models,
+          });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          this._panel.webview.postMessage({
+            command: 'modelsUnavailable',
+            error: message,
+          });
+        } catch {
+          // panel disposed mid-flight
+        }
+      }
+    })();
+  }
+
   private async _handleMessage(message: unknown): Promise<void> {
     if (
       typeof message !== 'object' ||
@@ -314,6 +372,7 @@ export class AgentEditorPanel implements vscode.Disposable {
 
     if (command === 'ready') {
       this._sendInit();
+      this._startModelDiscovery();
       return;
     }
     if (command === 'save') {
@@ -331,6 +390,8 @@ export class AgentEditorPanel implements vscode.Disposable {
   private async _handleSave(rawPayload: unknown): Promise<void> {
     const item = this._item;
     try {
+      const nullKeys = getNullKeys(rawPayload);
+
       if (item.type === 'agent') {
         const validated = validateAndClean<AgentConfig>(
           rawPayload,
@@ -341,7 +402,11 @@ export class AgentEditorPanel implements vscode.Disposable {
           if (!draft.agents) {
             draft.agents = {};
           }
-          draft.agents[agentName] = validated;
+          const existing = draft.agents[agentName] ?? {};
+          draft.agents[agentName] = { ...existing, ...validated };
+          for (const key of nullKeys) {
+            delete (draft.agents[agentName] as Record<string, unknown>)[key];
+          }
         });
       } else {
         const validated = validateAndClean<CategoryConfig>(
@@ -353,7 +418,13 @@ export class AgentEditorPanel implements vscode.Disposable {
           if (!draft.categories) {
             draft.categories = {};
           }
-          draft.categories[categoryName] = validated;
+          const existing = draft.categories[categoryName] ?? {};
+          draft.categories[categoryName] = { ...existing, ...validated };
+          for (const key of nullKeys) {
+            delete (draft.categories[categoryName] as Record<string, unknown>)[
+              key
+            ];
+          }
         });
       }
 

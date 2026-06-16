@@ -128,7 +128,7 @@ describe('AgentModelTreeProvider', () => {
     }
   });
 
-  it('flips agent contextValue to "override" when an override is set', () => {
+  it('flips agent contextValue to "agentOverride" when an override is set', () => {
     configStore = makeConfigStoreStub({
       sisyphus: { model: 'openai/gpt-4' },
     });
@@ -136,7 +136,7 @@ describe('AgentModelTreeProvider', () => {
     const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
     const leaves = provider.getChildren(group);
     const sisyphus = leaves.find((l) => l.nodeName === 'sisyphus')!;
-    expect(sisyphus.contextValue).toBe('override');
+    expect(sisyphus.contextValue).toBe('agentOverride');
     expect(sisyphus.label).toBe('sisyphus \u2192 openai/gpt-4');
   });
 
@@ -152,7 +152,7 @@ describe('AgentModelTreeProvider', () => {
     }
   });
 
-  it('flips category contextValue to "override" when an override is set', () => {
+  it('flips category contextValue to "categoryOverride" when an override is set', () => {
     configStore = makeConfigStoreStub({}, {
       deep: { model: 'deep/model' },
     });
@@ -162,7 +162,7 @@ describe('AgentModelTreeProvider', () => {
       .find((g) => g.group === 'categories')!;
     const leaves = provider.getChildren(group);
     const deep = leaves.find((l) => l.nodeName === 'deep')!;
-    expect(deep.contextValue).toBe('override');
+    expect(deep.contextValue).toBe('categoryOverride');
     expect(deep.label).toBe('deep \u2192 deep/model');
   });
 

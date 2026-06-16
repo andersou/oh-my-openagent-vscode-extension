@@ -23,6 +23,10 @@ import { ConfigStore } from './config/configStore.js';
 import { ProfileStore } from './config/profileStore.js';
 import { registerCommands } from './commands.js';
 import { AgentModelTreeProvider } from './ui/agentModelTreeProvider.js';
+import {
+  ModelDiscovery,
+  createDefaultProcessExecutor,
+} from './opencode/modelDiscovery.js';
 
 export function activate(context: vscode.ExtensionContext): void {
   // ---- Stores ----
@@ -33,6 +37,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // The provider subscribes to both stores' `change` events and re-fires
   // its `onDidChangeTreeData` so VS Code re-queries `getChildren()`.
   const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+  // ---- Model discovery ----
+  const modelDiscovery = new ModelDiscovery(
+    createDefaultProcessExecutor(),
+    context.extensionPath,
+  );
 
   // ---- File watcher ----
   // Start watching the resolved config file. Debounced 150ms inside
@@ -56,6 +66,7 @@ export function activate(context: vscode.ExtensionContext): void {
     configStore,
     profileStore,
     treeProvider,
+    modelDiscovery,
   );
 
   // ---- Dispose order ----

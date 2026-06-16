@@ -33,12 +33,21 @@
             type="text"
             id="f-model"
             name="model"
+            list="model-datalist"
             placeholder="provider/model-name"
             spellcheck="false"
             autocapitalize="off"
             autocorrect="off"
           />
+          <datalist id="model-datalist"></datalist>
           <p class="field__hint">Provider-qualified model identifier, e.g. <code>anthropic/claude-sonnet-4</code></p>
+          <p
+            class="field__model-status"
+            id="model-status"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></p>
         </div>
 
         <div class="field-grid">

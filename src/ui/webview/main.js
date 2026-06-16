@@ -96,6 +96,8 @@
     btnSave: document.getElementById('btn-save'),
     btnCreateProfile: document.getElementById('btn-create-profile'),
     model: document.getElementById('f-model'),
+    modelDatalist: document.getElementById('model-datalist'),
+    modelStatus: document.getElementById('model-status'),
     variant: document.getElementById('f-variant'),
     reasoning: document.getElementById('f-reasoning'),
     temperature: document.getElementById('f-temperature'),
@@ -312,6 +314,39 @@
           setStatus(null);
         }
       }, 3000);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Model status / datalist
+  // -------------------------------------------------------------------------
+
+  function setModelStatus(message, type) {
+    if (!el.modelStatus) return;
+    if (!message) {
+      el.modelStatus.hidden = true;
+      el.modelStatus.textContent = '';
+      el.modelStatus.className = 'field__model-status';
+      return;
+    }
+    el.modelStatus.hidden = false;
+    el.modelStatus.textContent = message;
+    el.modelStatus.className =
+      'field__model-status field__model-status--' + (type || 'loading');
+  }
+
+  function populateModelDatalist(modelIds) {
+    if (!el.modelDatalist) return;
+    while (el.modelDatalist.firstChild) {
+      el.modelDatalist.removeChild(el.modelDatalist.firstChild);
+    }
+    if (!Array.isArray(modelIds)) return;
+    for (var i = 0; i < modelIds.length; i++) {
+      var id = modelIds[i];
+      if (typeof id !== 'string' || id.length === 0) continue;
+      var opt = document.createElement('option');
+      opt.value = id;
+      el.modelDatalist.appendChild(opt);
     }
   }
 
@@ -582,6 +617,42 @@
       case 'profileCreated':
         setStatus('Profile "' + (msg.name || '') + '" created.', 'success');
         break;
+      case 'modelsLoading':
+        setModelStatus('Loading available models…', 'loading');
+        break;
+      case 'modelsLoaded': {
+        var raw = msg && msg.models;
+        var ids = Array.isArray(raw)
+          ? raw
+              .map(function (m) {
+                return m && typeof m === 'object' ? m.modelId : undefined;
+              })
+              .filter(function (id) {
+                return typeof id === 'string' && id.length > 0;
+              })
+          : [];
+        populateModelDatalist(ids);
+        if (ids.length > 0) {
+          setModelStatus(
+            ids.length + ' model' + (ids.length === 1 ? '' : 's') + ' available — type to filter.',
+            'loaded',
+          );
+        } else {
+          setModelStatus('No models reported by the local CLI.', 'loaded');
+        }
+        break;
+      }
+      case 'modelsUnavailable': {
+        var err =
+          msg && typeof msg.error === 'string' && msg.error.length > 0
+            ? msg.error
+            : 'the local opencode CLI is unavailable';
+        setModelStatus(
+          'Model list unavailable (' + err + '). You can type any model identifier.',
+          'unavailable',
+        );
+        break;
+      }
       default:
         break;
     }

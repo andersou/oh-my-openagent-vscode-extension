@@ -54,9 +54,10 @@ export interface AgentModelTreeItem extends vscode.TreeItem {
  *    `(active)` description.
  *
  * `contextValue` follows the manifest's menu wiring:
- *  - `agent` / `category` — built-in with no override (offers edit + add).
- *  - `override`           — built-in with an override (offers remove).
- *  - `profile`            — saved profile (offers activate / rename / ...).
+ *  - `agent` / `category`         — built-in with no override (offers edit + add).
+ *  - `agentOverride` / `categoryOverride` — built-in with an override
+ *    (offers edit + remove).
+ *  - `profile`                    — saved profile (offers activate / rename / ...).
  *
  * The provider re-fires its `onDidChangeTreeData` event whenever the config
  * store or the profile store emits `change`. The caller owns disposal of
@@ -189,7 +190,7 @@ export class AgentModelTreeProvider
       kind: hasOverride ? 'override' : 'agent',
       name,
       label: this.formatModelLabel(name, override?.model),
-      contextValue: hasOverride ? 'override' : 'agent',
+      contextValue: hasOverride ? 'agentOverride' : 'agent',
       icon: hasOverride ? 'edit' : 'person',
       tooltip: this.formatTooltip(name, override?.model),
     });
@@ -203,7 +204,7 @@ export class AgentModelTreeProvider
       kind: hasOverride ? 'override' : 'category',
       name,
       label: this.formatModelLabel(name, override?.model),
-      contextValue: hasOverride ? 'override' : 'category',
+      contextValue: hasOverride ? 'categoryOverride' : 'category',
       icon: hasOverride ? 'edit' : 'tag',
       tooltip: this.formatTooltip(name, override?.model),
     });
@@ -235,7 +236,7 @@ export class AgentModelTreeProvider
     kind: 'agent' | 'category' | 'override';
     name: string;
     label: string;
-    contextValue: 'agent' | 'category' | 'override';
+    contextValue: 'agent' | 'category' | 'agentOverride' | 'categoryOverride';
     icon: string;
     tooltip: string;
   }): AgentModelTreeItem {

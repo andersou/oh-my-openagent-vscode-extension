@@ -250,6 +250,57 @@ code {
   color: var(--vscode-descriptionForeground);
 }
 
+.field__model-status {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: model-status-in 140ms ease-out;
+}
+
+.field__model-status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.field__model-status--loading {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+.field__model-status--loaded {
+  color: var(--vscode-textLink-foreground);
+}
+
+.field__model-status--unavailable {
+  color: var(--vscode-descriptionForeground);
+}
+
+.field__model-status--unavailable::before {
+  background: var(--vscode-inputValidation-warningBorder, var(--vscode-descriptionForeground));
+  opacity: 0.8;
+}
+
+@keyframes model-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(-1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .field__error {
   margin: 0;
   font-size: 11px;
