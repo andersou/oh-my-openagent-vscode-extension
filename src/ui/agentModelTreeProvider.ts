@@ -44,6 +44,8 @@ export interface AgentModelTreeItem extends vscode.TreeItem {
   /** Stable identifier for the underlying config / profile entry. */
   nodeName?: string;
   children?: AgentModelTreeItem[];
+  /** For fallback model entries: the index within the parent's fallback_models array. */
+  fallbackIndex?: number;
 }
 
 /** Transient preview of a model override shown before the user saves. */
@@ -524,8 +526,9 @@ export class AgentModelTreeProvider
       item.kind = 'fallback';
       item.group = group;
       item.nodeName = name;
+      item.fallbackIndex = index;
       item.id = `${group}:${name}:fallback:${index}`;
-      item.contextValue = 'detail';
+      item.contextValue = 'fallbackModel';
       item.iconPath = new vscode.ThemeIcon('debug-step-over');
       item.tooltip = details.length > 0 ? `${model}\n${details.join('\n')}` : model;
       return item;

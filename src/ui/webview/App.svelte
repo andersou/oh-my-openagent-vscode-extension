@@ -130,14 +130,13 @@
   function readFormPayload() {
     const out = {};
     if (asString(model) !== undefined) out.model = asString(model);
-    if (asString(variant) !== undefined) out.variant = asString(variant);
-    if (asString(reasoning) !== undefined) out.reasoningEffort = asString(reasoning);
-    const t = asNumber(temperature);
-    if (t !== undefined) out.temperature = t;
-    const tp = asNumber(topP);
-    if (tp !== undefined) out.top_p = tp;
-    const mt = asInt(maxTokens);
-    if (mt !== undefined) out.maxTokens = mt;
+    // Explicit null clears the key from the JSON override (vs omitting
+    // it, which preserves whatever was already there).
+    out.variant = asString(variant) ?? null;
+    out.reasoningEffort = asString(reasoning) ?? null;
+    out.temperature = asNumber(temperature) ?? null;
+    out.top_p = asNumber(topP) ?? null;
+    out.maxTokens = asInt(maxTokens) ?? null;
     if (thinkingEnabled) {
       const thinking = { type: 'enabled' };
       const b = asInt(budgetTokens);
@@ -289,6 +288,40 @@
 
   function onRemoveFallback(index) {
     fallbackModels = fallbackModels.filter((_, i) => i !== index);
+    formDirty = true;
+    persist();
+  }
+
+  function onSwitchMain(index) {
+    const entry = fallbackModels[index];
+    if (!entry || !entry.model) return;
+
+    const currentModel = model;
+    const currentVariant = variant;
+
+    // Promote fallback to main
+    model = entry.model;
+    variant = entry.variant || '';
+
+    // Demote current main to the fallback slot
+    fallbackModels[index] = {
+      ...entry,
+      model: currentModel || fallbackModels[index].model,
+      variant: currentVariant || '',
+    };
+
+    // Recompute capabilities / variant / reasoning options for the new model
+    updateDynamicFieldsForModel(model);
+
+    // Update the tree sidebar preview so it reflects the swap before Save
+    if (model) {
+      if (modelChangeTimer) clearTimeout(modelChangeTimer);
+      modelChangeTimer = setTimeout(() => {
+        modelChangeTimer = null;
+        postMessage({ command: 'modelChanged', modelId: model });
+      }, 200);
+    }
+
     formDirty = true;
     persist();
   }
@@ -485,7 +518,10 @@
           <div class="fallback-card" role="listitem">
             <div class="fallback-card__header">
               <h3 class="fallback-card__title">Fallback {i + 1}</h3>
-              <button type="button" class="fallback-card__remove" onclick={() => onRemoveFallback(i)}>Remove</button>
+              <div class="fallback-card__actions">
+                <button type="button" class="fallback-card__switch" onclick={() => onSwitchMain(i)} disabled={!entry.model}>Switch as Main</button>
+                <button type="button" class="fallback-card__remove" onclick={() => onRemoveFallback(i)}>Remove</button>
+              </div>
             </div>
             <div class="fallback-card__row">
               <div class="field">
@@ -610,6 +646,11 @@
   .fallback-card__row--thinking { grid-template-columns: 1fr 1fr; align-items: center; }
   .fallback-card__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .fallback-card__title { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--vscode-descriptionForeground); }
+  .fallback-card__actions { display: flex; align-items: center; gap: 6px; }
+  .fallback-card__switch { background: transparent; border: 1px solid var(--vscode-textLink-foreground); color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 11px; padding: 2px 8px; border-radius: 2px; font-weight: 500; }
+  .fallback-card__switch:hover { background: var(--vscode-textLink-foreground); color: var(--vscode-button-foreground, #fff); }
+  .fallback-card__switch:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--vscode-descriptionForeground); color: var(--vscode-descriptionForeground); }
+  .fallback-card__switch:disabled:hover { background: transparent; color: var(--vscode-descriptionForeground); }
   .fallback-card__remove { background: transparent; border: 1px solid transparent; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: 2px; }
   .fallback-card__remove:hover { color: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); }
   .fallback-card__checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; }

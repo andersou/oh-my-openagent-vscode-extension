@@ -29,6 +29,7 @@ import type {
   AgentModelTreeProvider,
 } from './ui/agentModelTreeProvider.js';
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
+import type { FallbackModelConfig } from './config/schema.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -319,6 +320,74 @@ export function registerCommands(
         }
       },
     ),
+
+    // 13. Swap the agent's / category's main model with the selected fallback.
+    vscode.commands.registerCommand(
+      'ohMyOpenAgent.switchMainModel',
+      async (item: AgentModelTreeItem | undefined) => {
+        if (!isFallbackItem(item)) {
+          void vscode.window.showWarningMessage(
+            'Select a fallback model entry in the Models view first.',
+          );
+          return;
+        }
+        const group = item.group;
+        const agentName = item.nodeName;
+        const fallbackIndex = item.fallbackIndex;
+        if (fallbackIndex === undefined || fallbackIndex < 0) {
+          void vscode.window.showWarningMessage(
+            'Could not identify the fallback model entry.',
+          );
+          return;
+        }
+
+        try {
+          await configStore.updateConfig((draft) => {
+            const config =
+              group === 'agents'
+                ? draft.agents?.[agentName]
+                : draft.categories?.[agentName];
+            if (!config) {
+              throw new Error(
+                `No override found for ${group === 'agents' ? 'agent' : 'category'} "${agentName}".\nAdd an override first, then try again.`,
+              );
+            }
+            const rawFallbacks = config.fallback_models;
+            if (!Array.isArray(rawFallbacks) || rawFallbacks.length <= fallbackIndex) {
+              throw new Error(
+                `Fallback entry at index ${fallbackIndex} not found for "${agentName}".`,
+              );
+            }
+
+            const entry = rawFallbacks[fallbackIndex];
+            const fallbackModel =
+              typeof entry === 'string' ? entry : entry.model;
+            const fallbackVariant =
+              typeof entry === 'string' ? undefined : entry.variant;
+
+            const currentModel = config.model;
+            const currentVariant = config.variant;
+
+            config.model = fallbackModel;
+            if (fallbackVariant !== undefined) {
+              config.variant = fallbackVariant;
+            } else if (currentVariant !== undefined) {
+              // Clear the main variant when switching to a fallback that has none
+              delete config.variant;
+            }
+
+            const replacement: string | FallbackModelConfig = currentModel
+              ? currentVariant !== undefined
+                ? { model: currentModel, variant: currentVariant }
+                : currentModel
+              : fallbackModel;
+            rawFallbacks[fallbackIndex] = replacement;
+          });
+        } catch (err) {
+          reportError('Failed to switch main model', err);
+        }
+      },
+    ),
   ];
 
   return vscode.Disposable.from(...commands);
@@ -373,6 +442,21 @@ function isOverrideItem(
     (item.group === 'agents' || item.group === 'categories') &&
     typeof item.nodeName === 'string' &&
     item.nodeName.length > 0
+  );
+}
+
+/** A fallback model entry under an agent or category override. */
+function isFallbackItem(
+  item: AgentModelTreeItem | undefined,
+): item is AgentModelTreeItem & { nodeName: string; fallbackIndex: number } {
+  return (
+    item !== undefined &&
+    item.kind === 'fallback' &&
+    (item.group === 'agents' || item.group === 'categories') &&
+    typeof item.nodeName === 'string' &&
+    item.nodeName.length > 0 &&
+    typeof item.fallbackIndex === 'number' &&
+    item.fallbackIndex >= 0
   );
 }
 
