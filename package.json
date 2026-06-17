@@ -8,7 +8,7 @@
   "publisher": "oh-my-openagent",
   "repository": {
     "type": "git",
-    "url": "https://github.com/andersou/oh-my-openagent-extension.git"
+    "url": "https://github.com/andersou/oh-my-openagent-vscode-extension.git"
   },
   "engines": {
     "vscode": "^1.85.0"
