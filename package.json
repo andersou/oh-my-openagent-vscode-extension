@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "private": true,
   "license": "MIT",
-  "publisher": "oh-my-openagent",
+  "publisher": "andersou",
   "repository": {
     "type": "git",
     "url": "https://github.com/andersou/oh-my-openagent-vscode-extension.git"
