@@ -1,6 +1,9 @@
 # Oh My OpenAgent for VS Code
 
-A VS Code companion extension for Oh My OpenAgent. It gives you a visual tree of agents, categories, and profiles, and a form-based editor for model overrides without hand-editing JSONC files.
+A VS Code companion extension for [Oh My OpenAgent](https://omo.dev) — a community-driven enhancement layer for OpenAI Codex CLI. It gives you a visual tree of agents, categories, and profiles, and a form-based editor for model overrides without hand-editing JSONC files.
+
+- **GitHub**: [github.com/oh-my-openagent/oh-my-openagent](https://github.com/oh-my-openagent/oh-my-openagent) — main project repository
+- **Site**: [omo.dev](https://omo.dev) — official documentation and downloads
 
 ## Screenshots
 

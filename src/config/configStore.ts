@@ -199,6 +199,20 @@ export class ConfigStore {
     this.cachedConfig = this.parseConfig(this.cachedRaw);
   }
 
+  /**
+   * Force the next config read to go to disk by invalidating the in-memory
+   * cache, then emit a change event so subscribers (e.g. the sidebar tree
+   * provider) re-query from the fresh data.
+   *
+   * This is the programmatic equivalent of the file-watcher path and is
+   * triggered by the sidebar's Refresh button.
+   */
+  refreshFromDisk(): void {
+    this.cachedConfig = null;
+    this.cachedRaw = null;
+    this._emitter.emit('change');
+  }
+
   /** Return the parsed config (cached). */
   getConfig(): OmOConfig {
     if (this.cachedConfig === null) {

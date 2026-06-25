@@ -363,9 +363,12 @@ export class AgentModelTreeProvider
   ): AgentModelTreeItem {
     const model = config.model;
     const label = `${name} \u2192 ${model ?? 'default'}`;
+    const children = this.createConfigChildren(group, name, config);
     const item = new vscode.TreeItem(
       label,
-      vscode.TreeItemCollapsibleState.None,
+      children.length > 0
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
     ) as AgentModelTreeItem;
     item.kind = group === 'agents' ? 'agent' : 'category';
     item.group = group;
@@ -385,6 +388,7 @@ export class AgentModelTreeProvider
       title: 'Edit',
       arguments: [{ kind: item.kind, nodeName: name, group, profileName }],
     };
+    item.children = children;
     return item;
   }
 

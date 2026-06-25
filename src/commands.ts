@@ -105,8 +105,9 @@ export function registerCommands(
       },
     ),
 
-    // 4. Force the tree to re-query its data provider.
+    // 4. Force the tree to re-query its data provider from disk.
     vscode.commands.registerCommand('ohMyOpenAgent.refresh', () => {
+      configStore.refreshFromDisk();
       treeProvider.refresh();
     }),
 

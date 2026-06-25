@@ -445,6 +445,18 @@ export class AgentEditorPanel implements vscode.Disposable {
             validated,
             nullKeys,
           );
+          if (this._profileStore.getActiveProfileName() === item.profile) {
+            await this._configStore.updateConfig((draft) => {
+              if (!draft.agents) {
+                draft.agents = {};
+              }
+              const existing = draft.agents[agentName] ?? {};
+              draft.agents[agentName] = { ...existing, ...validated };
+              for (const key of nullKeys) {
+                delete (draft.agents[agentName] as Record<string, unknown>)[key];
+              }
+            });
+          }
         } else {
           await this._configStore.updateConfig((draft) => {
             if (!draft.agents) {
@@ -471,6 +483,18 @@ export class AgentEditorPanel implements vscode.Disposable {
             validated,
             nullKeys,
           );
+          if (this._profileStore.getActiveProfileName() === item.profile) {
+            await this._configStore.updateConfig((draft) => {
+              if (!draft.categories) {
+                draft.categories = {};
+              }
+              const existing = draft.categories[categoryName] ?? {};
+              draft.categories[categoryName] = { ...existing, ...validated };
+              for (const key of nullKeys) {
+                delete (draft.categories[categoryName] as Record<string, unknown>)[key];
+              }
+            });
+          }
         } else {
           await this._configStore.updateConfig((draft) => {
             if (!draft.categories) {
