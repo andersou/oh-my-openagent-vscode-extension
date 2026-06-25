@@ -255,7 +255,7 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(messages).toContainEqual({ command: 'reloadModels' });
   });
 
-  it('posts modelChanged when the model input changes', async () => {
+  it('does not post modelChanged when the model input changes', async () => {
     const { window, messages } = env;
     const document = window.document;
 
@@ -273,7 +273,7 @@ describe('webview lazy model picker (end-to-end)', () => {
     modelInput.dispatchEvent(new window.Event('change', { bubbles: true }));
     await window.happyDOM.waitUntilComplete();
 
-    expect(messages).toContainEqual({ command: 'modelChanged', modelId: 'openai/gpt-4.1' });
+    expect(messages).not.toContainEqual({ command: 'modelChanged', modelId: 'openai/gpt-4.1' });
   });
 
   it('updates dynamic fields based on selected model capabilities', async () => {
@@ -424,7 +424,32 @@ describe('webview lazy model picker (end-to-end)', () => {
     ]);
   });
 
-  it('debounces modelChanged messages while typing', async () => {
+  it('does not post modelChanged when switching a fallback to main', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: {
+        model: 'main/model',
+        fallback_models: ['fallback/model'],
+      },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const switchBtn = window.document.querySelector('.fallback-card__switch') as HTMLButtonElement;
+    switchBtn.click();
+    await window.happyDOM.waitUntilComplete();
+    await new Promise((r) => setTimeout(r, 300));
+
+    const modelChangedMessages = messages.filter(
+      (m): m is { command: string; modelId: string } =>
+        typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'modelChanged',
+    );
+    expect(modelChangedMessages).toHaveLength(0);
+  });
+
+  it('does not post modelChanged messages while typing', async () => {
     const { window, messages } = env;
     window.postMessage({
       command: 'init',
@@ -454,8 +479,7 @@ describe('webview lazy model picker (end-to-end)', () => {
       (m): m is { command: string; modelId: string } =>
         typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'modelChanged',
     );
-    expect(after).toHaveLength(1);
-    expect(after[0].modelId).toBe('openai/gpt-4');
+    expect(after).toHaveLength(0);
   });
 
   it('populates reasoning options from verbose metadata variants', async () => {

@@ -30,8 +30,8 @@ import type { AgentModelTreeProvider } from './agentModelTreeProvider.js';
 
 /** Identifies which entity the editor is showing. */
 export type EditorItem =
-  | { type: 'agent'; name: string }
-  | { type: 'category'; name: string };
+  | { type: 'agent'; name: string; profile?: string }
+  | { type: 'category'; name: string; profile?: string };
 
 // ---------------------------------------------------------------------------
 // Internal constants & helpers
@@ -257,7 +257,6 @@ export class AgentEditorPanel implements vscode.Disposable {
     if (AgentEditorPanel.currentPanel === this) {
       AgentEditorPanel.currentPanel = undefined;
     }
-    this._clearCurrentPreview();
     this._panel.dispose();
     while (this._disposables.length > 0) {
       const d = this._disposables.pop();
@@ -267,25 +266,18 @@ export class AgentEditorPanel implements vscode.Disposable {
     }
   }
 
-  private _clearCurrentPreview(): void {
-    this._treeProvider.clearPreview(
-      this._item.type === 'agent' ? 'agents' : 'categories',
-      this._item.name,
-    );
-  }
-
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
 
   private static _titleFor(item: EditorItem): string {
     const prefix = item.type === 'agent' ? 'Agent Model' : 'Category Model';
-    return `${prefix}: ${item.name}`;
+    const suffix = item.profile ? ` (profile: ${item.profile})` : '';
+    return `${prefix}: ${item.name}${suffix}`;
   }
 
   /** Switch the panel to a different item and refresh the HTML. */
   private _switchItem(item: EditorItem): void {
-    this._clearCurrentPreview();
     this._item = item;
     this._panel.title = AgentEditorPanel._titleFor(item);
     this._panel.webview.html = this._renderHtml();
@@ -325,8 +317,14 @@ export class AgentEditorPanel implements vscode.Disposable {
 
   private _sendInit(): void {
     const item = this._item;
-    const current =
-      item.type === 'agent'
+    const profile = item.profile
+      ? this._profileStore.getProfile(item.profile)
+      : undefined;
+    const current = item.profile
+      ? item.type === 'agent'
+        ? profile?.agents?.[item.name]
+        : profile?.categories?.[item.name]
+      : item.type === 'agent'
         ? this._configStore.getAgent(item.name)
         : this._configStore.getCategory(item.name);
 
@@ -425,13 +423,6 @@ export class AgentEditorPanel implements vscode.Disposable {
       this._startModelDiscovery(true);
       return;
     }
-    if (command === 'modelChanged') {
-      const modelId = (msg as { modelId?: unknown }).modelId;
-      if (typeof modelId === 'string' && modelId.length > 0) {
-        this._treeProvider.setPreview(this._item.type === 'agent' ? 'agents' : 'categories', this._item.name, modelId);
-      }
-      return;
-    }
     // Unknown command: ignore silently.
   }
 
@@ -446,37 +437,56 @@ export class AgentEditorPanel implements vscode.Disposable {
           AGENT_FIELDS,
         );
         const agentName = item.name;
-        await this._configStore.updateConfig((draft) => {
-          if (!draft.agents) {
-            draft.agents = {};
-          }
-          const existing = draft.agents[agentName] ?? {};
-          draft.agents[agentName] = { ...existing, ...validated };
-          for (const key of nullKeys) {
-            delete (draft.agents[agentName] as Record<string, unknown>)[key];
-          }
-        });
+        if (item.profile) {
+          await this._profileStore.updateProfileEntry(
+            item.profile,
+            'agents',
+            agentName,
+            validated,
+            nullKeys,
+          );
+        } else {
+          await this._configStore.updateConfig((draft) => {
+            if (!draft.agents) {
+              draft.agents = {};
+            }
+            const existing = draft.agents[agentName] ?? {};
+            draft.agents[agentName] = { ...existing, ...validated };
+            for (const key of nullKeys) {
+              delete (draft.agents[agentName] as Record<string, unknown>)[key];
+            }
+          });
+        }
       } else {
         const validated = validateAndClean<CategoryConfig>(
           rawPayload,
           CATEGORY_FIELDS,
         );
         const categoryName = item.name;
-        await this._configStore.updateConfig((draft) => {
-          if (!draft.categories) {
-            draft.categories = {};
-          }
-          const existing = draft.categories[categoryName] ?? {};
-          draft.categories[categoryName] = { ...existing, ...validated };
-          for (const key of nullKeys) {
-            delete (draft.categories[categoryName] as Record<string, unknown>)[
-              key
-            ];
-          }
-        });
+        if (item.profile) {
+          await this._profileStore.updateProfileEntry(
+            item.profile,
+            'categories',
+            categoryName,
+            validated,
+            nullKeys,
+          );
+        } else {
+          await this._configStore.updateConfig((draft) => {
+            if (!draft.categories) {
+              draft.categories = {};
+            }
+            const existing = draft.categories[categoryName] ?? {};
+            draft.categories[categoryName] = { ...existing, ...validated };
+            for (const key of nullKeys) {
+              delete (draft.categories[categoryName] as Record<string, unknown>)[
+                key
+              ];
+            }
+          });
+        }
       }
 
-      this._clearCurrentPreview();
       this._panel.webview.postMessage({ command: 'saved' });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Save failed';

@@ -245,6 +245,154 @@ describe('ProfileStore', () => {
   });
 
   // -----------------------------------------------------------------------
+  // updateProfileEntry
+  // -----------------------------------------------------------------------
+
+  describe('updateProfileEntry', () => {
+    it('merges an agent patch over an existing profile entry', async () => {
+      // Given: a profile entry with fields the editor did not send back
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('fast');
+      await profileStore.updateProfile('fast', {
+        agents: {
+          sisyphus: {
+            model: 'old/model',
+            prompt: 'keep this prompt',
+            tools: { read: true },
+          },
+        },
+      });
+
+      // When: only the model field is saved from a profile-context editor
+      const updated = await profileStore.updateProfileEntry(
+        'fast',
+        'agents',
+        'sisyphus',
+        { model: 'new/model' },
+        new Set(),
+      );
+
+      // Then: the patch is merged without dropping unrelated profile fields
+      expect(updated.agents?.sisyphus).toEqual({
+        model: 'new/model',
+        prompt: 'keep this prompt',
+        tools: { read: true },
+      });
+    });
+
+    it('deletes null-key fields after merging an entry patch', async () => {
+      // Given: a profile category entry with a clearable field
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('careful');
+      await profileStore.updateProfile('careful', {
+        categories: {
+          deep: {
+            model: 'old/category',
+            description: 'remove me',
+            max_prompt_tokens: 200000,
+          },
+        },
+      });
+
+      // When: the editor submits a null key for deletion
+      const updated = await profileStore.updateProfileEntry(
+        'careful',
+        'categories',
+        'deep',
+        { model: 'new/category' },
+        new Set(['description']),
+      );
+
+      // Then: the null-key field is removed while other fields are preserved
+      expect(updated.categories?.deep).toEqual({
+        model: 'new/category',
+        max_prompt_tokens: 200000,
+      });
+    });
+
+    it('creates the group map and entry when missing', async () => {
+      // Given: a profile captured from an empty active config
+      createStores();
+      await profileStore.createProfile('empty');
+
+      // When: saving a category into the empty profile
+      const updated = await profileStore.updateProfileEntry(
+        'empty',
+        'categories',
+        'quick',
+        { model: 'quick/model' },
+        new Set(),
+      );
+
+      // Then: the categories map and entry are created
+      expect(updated.categories?.quick).toEqual({ model: 'quick/model' });
+    });
+
+    it('throws when the target profile is unknown', async () => {
+      // Given: a sidecar without the requested profile
+      setupWithConfig(CONFIG_MINIMAL);
+
+      // When/Then: the profile-context write rejects with the profile name
+      await expect(
+        profileStore.updateProfileEntry(
+          'ghost',
+          'agents',
+          'sisyphus',
+          { model: 'ghost/model' },
+          new Set(),
+        ),
+      ).rejects.toThrow('Profile "ghost" not found');
+    });
+
+    it('emits change after a successful entry update', async () => {
+      // Given: a profile and a change listener on the profile store
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('fast');
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      // When: the profile entry is updated
+      await profileStore.updateProfileEntry(
+        'fast',
+        'agents',
+        'sisyphus',
+        { model: 'changed/model' },
+        new Set(),
+      );
+
+      // Then: writeProfilesFile emitted the store change event
+      expect(changes).toBe(1);
+    });
+
+    it('bumps updatedAt when an entry is updated', async () => {
+      // Given: a profile with an old timestamp on disk
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('fast');
+      const oldUpdatedAt = '2000-01-01T00:00:00.000Z';
+      const onDisk = readSidecar(sidecarPath);
+      onDisk.profiles[0].updatedAt = oldUpdatedAt;
+      fs.writeFileSync(sidecarPath, `${JSON.stringify(onDisk, null, 2)}\n`, 'utf-8');
+
+      // When: a profile entry is updated
+      const updated = await profileStore.updateProfileEntry(
+        'fast',
+        'agents',
+        'sisyphus',
+        { model: 'new/model' },
+        new Set(),
+      );
+
+      // Then: the profile updatedAt reflects the new write
+      expect(updated.updatedAt).not.toBe(oldUpdatedAt);
+      expect(new Date(updated.updatedAt!).getTime()).toBeGreaterThan(
+        new Date(oldUpdatedAt).getTime(),
+      );
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // renameProfile
   // -----------------------------------------------------------------------
 

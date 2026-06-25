@@ -2,7 +2,13 @@ import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ConfigStore } from './configStore.js';
-import type { Profile, ProfilesFile, OmOConfig } from './schema.js';
+import type {
+  AgentConfig,
+  CategoryConfig,
+  Profile,
+  ProfilesFile,
+  OmOConfig,
+} from './schema.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -169,6 +175,58 @@ export class ProfileStore {
     await this.writeProfilesFile(data);
 
     return updated;
+  }
+
+  async updateProfileEntry(
+    profileName: string,
+    group: 'agents',
+    entryName: string,
+    patch: AgentConfig,
+    nullKeys: Set<string>,
+  ): Promise<Profile>;
+  async updateProfileEntry(
+    profileName: string,
+    group: 'categories',
+    entryName: string,
+    patch: CategoryConfig,
+    nullKeys: Set<string>,
+  ): Promise<Profile>;
+  async updateProfileEntry(
+    profileName: string,
+    group: 'agents' | 'categories',
+    entryName: string,
+    patch: AgentConfig | CategoryConfig,
+    nullKeys: Set<string>,
+  ): Promise<Profile> {
+    const data = this.readProfilesFile();
+    const profile = data.profiles.find((p) => p.name === profileName);
+
+    if (!profile) {
+      throw new Error(`Profile "${profileName}" not found`);
+    }
+
+    if (group === 'agents') {
+      const entries = profile.agents ?? {};
+      const existing = entries[entryName] ?? {};
+      entries[entryName] = { ...existing, ...patch };
+      for (const key of nullKeys) {
+        delete (entries[entryName] as Record<string, unknown>)[key];
+      }
+      profile.agents = entries;
+    } else {
+      const entries = profile.categories ?? {};
+      const existing = entries[entryName] ?? {};
+      entries[entryName] = { ...existing, ...patch };
+      for (const key of nullKeys) {
+        delete (entries[entryName] as Record<string, unknown>)[key];
+      }
+      profile.categories = entries;
+    }
+
+    profile.updatedAt = new Date().toISOString();
+    await this.writeProfilesFile(data);
+
+    return profile;
   }
 
   /**

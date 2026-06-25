@@ -43,14 +43,11 @@ export interface AgentModelTreeItem extends vscode.TreeItem {
   group?: AgentModelGroupKind;
   /** Stable identifier for the underlying config / profile entry. */
   nodeName?: string;
+  /** Profile context for profile-nested agent/category leaves. */
+  profileName?: string;
   children?: AgentModelTreeItem[];
   /** For fallback model entries: the index within the parent's fallback_models array. */
   fallbackIndex?: number;
-}
-
-/** Transient preview of a model override shown before the user saves. */
-interface ModelPreview {
-  model: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,9 +96,6 @@ export class AgentModelTreeProvider
   /** Backing tree view, set by the caller after `createTreeView`. */
   private view: vscode.TreeView<AgentModelTreeItem> | undefined;
 
-  /** In-memory previews keyed by group:nodeName, updated by the editor. */
-  private readonly previews = new Map<string, ModelPreview>();
-
   constructor(
     private readonly configStore: ConfigStore,
     private readonly profileStore: ProfileStore,
@@ -123,36 +117,6 @@ export class AgentModelTreeProvider
   /** Fire `onDidChangeTreeData` so VS Code re-queries `getChildren()`. */
   refresh(): void {
     this._onDidChangeTreeData.fire();
-  }
-
-  /**
-   * Set a transient model preview for a leaf. The preview overrides the
-   * displayed model in the tree until it is cleared by `clearPreview`, a
-   * config change, or provider disposal. Used by the editor to show the
-   * selected model before the user clicks Save.
-   */
-  setPreview(
-    group: Exclude<AgentModelGroupKind, 'profiles'>,
-    nodeName: string,
-    model: string,
-  ): void {
-    this.previews.set(`${group}:${nodeName}`, { model });
-    this.refresh();
-  }
-
-  /** Remove any transient preview for the given leaf. */
-  clearPreview(
-    group: Exclude<AgentModelGroupKind, 'profiles'>,
-    nodeName: string,
-  ): void {
-    this.previews.delete(`${group}:${nodeName}`);
-    this.refresh();
-  }
-
-  /** Remove all transient previews. */
-  clearAllPreviews(): void {
-    this.previews.clear();
-    this.refresh();
   }
 
   /**
@@ -237,8 +201,7 @@ export class AgentModelTreeProvider
   private createAgentLeaf(name: string): AgentModelTreeItem {
     const override = this.configStore.getAgent(name);
     const hasOverride = override !== undefined;
-    const preview = this.previews.get(`agents:${name}`);
-    const effectiveModel = preview?.model ?? override?.model;
+    const effectiveModel = override?.model;
     const children = this.createConfigChildren('agents', name, override);
     return this.createLeaf({
       group: 'agents',
@@ -255,8 +218,7 @@ export class AgentModelTreeProvider
   private createCategoryLeaf(name: string): AgentModelTreeItem {
     const override = this.configStore.getCategory(name);
     const hasOverride = override !== undefined;
-    const preview = this.previews.get(`categories:${name}`);
-    const effectiveModel = preview?.model ?? override?.model;
+    const effectiveModel = override?.model;
     const children = this.createConfigChildren('categories', name, override);
     return this.createLeaf({
       group: 'categories',
@@ -408,6 +370,7 @@ export class AgentModelTreeProvider
     item.kind = group === 'agents' ? 'agent' : 'category';
     item.group = group;
     item.nodeName = name;
+    item.profileName = profileName;
     item.id = `profile:${profileName}:${group === 'agents' ? 'agent' : 'category'}:${name}`;
     item.contextValue = group === 'agents' ? 'agent' : 'category';
     item.iconPath = new vscode.ThemeIcon(group === 'agents' ? 'person' : 'tag');
@@ -420,7 +383,7 @@ export class AgentModelTreeProvider
     item.command = {
       command: group === 'agents' ? 'ohMyOpenAgent.editAgent' : 'ohMyOpenAgent.editCategory',
       title: 'Edit',
-      arguments: [{ kind: item.kind, nodeName: name }],
+      arguments: [{ kind: item.kind, nodeName: name, group, profileName }],
     };
     return item;
   }

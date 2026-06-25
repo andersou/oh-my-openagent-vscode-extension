@@ -1,5 +1,15 @@
+<script module>
+  let fallbackUid = 0;
+
+  function nextFallbackUid() {
+    fallbackUid += 1;
+    return fallbackUid;
+  }
+</script>
+
 <script>
   import { onMount } from 'svelte';
+  import { moveItem } from './reorder.js';
 
   let entityKind = $state(null);
   let entityName = $state(null);
@@ -15,12 +25,16 @@
   let initialThinkingType = $state(null);
   let initialized = $state(false);
   let formDirty = $state(false);
+  let samplingOpen = $state(false);
+  let thinkingOpen = $state(false);
   let status = $state({ message: '', type: '' });
   let modelStatus = $state({ message: '', type: 'loading' });
   let modelDatalist = $state([]);
   let modelMetadata = $state({});
   let availableVariants = $state([]);
   let availableReasoning = $state([]);
+  let dragIndex = $state(null);
+  let dragOverIndex = $state(null);
 
   const FALLBACK_VARIANTS = ['max', 'xhigh', 'high', 'medium', 'low'];
   const FALLBACK_REASONING = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -31,7 +45,6 @@
   let reasoningSupported = $derived(capabilities ? capabilities.reasoning !== false : true);
 
   let vscodeApi = null;
-  let modelChangeTimer = null;
   let statusTimer = null;
 
   function getApi() {
@@ -200,11 +213,11 @@
     initialThinkingType = cfg.thinking?.type === 'enabled' || cfg.thinking?.type === 'disabled' ? cfg.thinking.type : null;
     if (Array.isArray(cfg.fallback_models)) {
       fallbackModels = cfg.fallback_models.map((entry) => {
-        if (typeof entry === 'string') return { model: entry };
-        return { ...entry, model: entry.model ?? '' };
+        if (typeof entry === 'string') return { model: entry, __uid: nextFallbackUid() };
+        return { ...entry, model: entry.model ?? '', __uid: nextFallbackUid() };
       });
     } else if (typeof cfg.fallback_models === 'string' && cfg.fallback_models.length > 0) {
-      fallbackModels = [{ model: cfg.fallback_models }];
+      fallbackModels = [{ model: cfg.fallback_models, __uid: nextFallbackUid() }];
     } else {
       fallbackModels = [];
     }
@@ -219,13 +232,6 @@
     updateDynamicFieldsForModel(model);
     formDirty = true;
     persist();
-    if (modelChangeTimer) clearTimeout(modelChangeTimer);
-    const current = model;
-    if (!current) return;
-    modelChangeTimer = setTimeout(() => {
-      modelChangeTimer = null;
-      postMessage({ command: 'modelChanged', modelId: current });
-    }, 200);
   }
 
   function updateDynamicFieldsForModel(modelId) {
@@ -281,9 +287,45 @@
   }
 
   function onAddFallback() {
-    fallbackModels = [...fallbackModels, { model: '' }];
+    fallbackModels = [...fallbackModels, { model: '', __uid: nextFallbackUid() }];
     formDirty = true;
     persist();
+  }
+
+  function canMoveFallback(from, to) {
+    const length = fallbackModels.length;
+    return Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to >= 0 && from < length && to < length && from !== to;
+  }
+
+  function moveFallback(from, to) {
+    if (!canMoveFallback(from, to)) return;
+    fallbackModels = moveItem(fallbackModels, from, to);
+    formDirty = true;
+    persist();
+  }
+
+  function clearDragState() {
+    dragIndex = null;
+    dragOverIndex = null;
+  }
+
+  function onFallbackDragStart(event, index) {
+    dragIndex = index;
+    dragOverIndex = index;
+    event.dataTransfer?.setData('text/plain', String(index));
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  }
+
+  function onFallbackDragOver(event, index) {
+    event.preventDefault();
+    dragOverIndex = index;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  }
+
+  function onFallbackDrop(event, index) {
+    event.preventDefault();
+    moveFallback(dragIndex, index);
+    clearDragState();
   }
 
   function onRemoveFallback(index) {
@@ -312,15 +354,6 @@
 
     // Recompute capabilities / variant / reasoning options for the new model
     updateDynamicFieldsForModel(model);
-
-    // Update the tree sidebar preview so it reflects the swap before Save
-    if (model) {
-      if (modelChangeTimer) clearTimeout(modelChangeTimer);
-      modelChangeTimer = setTimeout(() => {
-        modelChangeTimer = null;
-        postMessage({ command: 'modelChanged', modelId: model });
-      }, 200);
-    }
 
     formDirty = true;
     persist();
@@ -468,12 +501,16 @@
     </section>
 
     <section class="editor__section" data-section="sampling" hidden={!temperatureSupported}>
-      <header class="editor__section-header">
-        <h2 class="editor__section-title">Sampling</h2>
-        <p class="editor__section-desc">Generation parameters applied per request.</p>
-      </header>
+      <button type="button" class="editor__section-toggle" aria-expanded={samplingOpen} aria-controls="sampling-section-body" onclick={() => samplingOpen = !samplingOpen}>
+        <span class="editor__section-header">
+          <span class="editor__section-title">Sampling</span>
+          <span class="editor__section-desc">Generation parameters applied per request.</span>
+        </span>
+        <span class="editor__section-chevron" class:expanded={samplingOpen} aria-hidden="true">▸</span>
+      </button>
 
-      <div class="field-grid field-grid--three">
+      <div id="sampling-section-body" hidden={!samplingOpen}>
+        <div class="field-grid field-grid--three">
         <div class="field">
           <label class="field__label" for="f-temperature">Temperature</label>
           <input class="field__input" type="number" id="f-temperature" name="temperature" step="0.1" min="0" max="2" inputmode="decimal" placeholder="0.0 \u2013 2.0" bind:value={temperature} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support temperature.'} />
@@ -486,24 +523,30 @@
           <label class="field__label" for="f-max-tokens">Max tokens</label>
           <input class="field__input" type="number" id="f-max-tokens" name="maxTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 4096" bind:value={maxTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support max tokens.'} />
         </div>
+        </div>
       </div>
     </section>
 
     <section class="editor__section" data-section="thinking" hidden={!reasoningSupported}>
-      <header class="editor__section-header">
-        <h2 class="editor__section-title">Thinking</h2>
-        <p class="editor__section-desc">Extended reasoning budget for models that support it.</p>
-      </header>
+      <button type="button" class="editor__section-toggle" aria-expanded={thinkingOpen} aria-controls="thinking-section-body" onclick={() => thinkingOpen = !thinkingOpen}>
+        <span class="editor__section-header">
+          <span class="editor__section-title">Thinking</span>
+          <span class="editor__section-desc">Extended reasoning budget for models that support it.</span>
+        </span>
+        <span class="editor__section-chevron" class:expanded={thinkingOpen} aria-hidden="true">▸</span>
+      </button>
 
-      <div class="field field--checkbox">
-        <input class="field__checkbox" type="checkbox" id="f-thinking-enabled" name="thinkingEnabled" bind:checked={thinkingEnabled} onchange={onThinkingToggle} disabled={!reasoningSupported} />
-        <label class="field__label field__label--inline" for="f-thinking-enabled">Enable extended thinking</label>
-      </div>
+      <div id="thinking-section-body" hidden={!thinkingOpen}>
+        <div class="field field--checkbox">
+          <input class="field__checkbox" type="checkbox" id="f-thinking-enabled" name="thinkingEnabled" bind:checked={thinkingEnabled} onchange={onThinkingToggle} disabled={!reasoningSupported} />
+          <label class="field__label field__label--inline" for="f-thinking-enabled">Enable extended thinking</label>
+        </div>
 
-      <div class="field field--nested" id="f-budget-field" hidden={!thinkingEnabled}>
-        <label class="field__label" for="f-budget-tokens">Budget tokens</label>
-        <input class="field__input" type="number" id="f-budget-tokens" name="budgetTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 8192" bind:value={budgetTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!reasoningSupported} />
-        <p class="field__hint">Token budget reserved for chain-of-thought reasoning.</p>
+        <div class="field field--nested" id="f-budget-field" hidden={!thinkingEnabled}>
+          <label class="field__label" for="f-budget-tokens">Budget tokens</label>
+          <input class="field__input" type="number" id="f-budget-tokens" name="budgetTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 8192" bind:value={budgetTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!reasoningSupported} />
+          <p class="field__hint">Token budget reserved for chain-of-thought reasoning.</p>
+        </div>
       </div>
     </section>
 
@@ -514,23 +557,48 @@
       </header>
 
       <div class="fallback-list" id="fallback-list" role="list">
-        {#each fallbackModels as entry, i (i)}
-          <div class="fallback-card" role="listitem">
+        {#each fallbackModels as entry, i (entry.__uid)}
+          <div
+            class="fallback-card"
+            class:dragging={dragIndex === i}
+            class:drag-over={dragOverIndex === i && dragIndex !== null && dragIndex !== i}
+            role="listitem"
+            ondragover={(e) => onFallbackDragOver(e, i)}
+            ondrop={(e) => onFallbackDrop(e, i)}
+            ondragend={clearDragState}
+          >
             <div class="fallback-card__header">
-              <h3 class="fallback-card__title">Fallback {i + 1}</h3>
+              <div class="fallback-card__heading">
+                <button
+                  type="button"
+                  class="fallback-card__handle"
+                  draggable="true"
+                  title="Drag fallback {i + 1} to reorder"
+                  aria-label="Drag fallback {i + 1} to reorder"
+                  ondragstart={(e) => onFallbackDragStart(e, i)}
+                  ondragend={clearDragState}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                    <path d="M3 2h1.5v1.5H3V2Zm4.5 0H9v1.5H7.5V2ZM3 5.25h1.5v1.5H3v-1.5Zm4.5 0H9v1.5H7.5v-1.5ZM3 8.5h1.5V10H3V8.5Zm4.5 0H9V10H7.5V8.5Z" />
+                  </svg>
+                </button>
+                <h3 class="fallback-card__title">Fallback {i + 1}</h3>
+              </div>
               <div class="fallback-card__actions">
+                <button type="button" class="fallback-card__move" onclick={() => moveFallback(i, i - 1)} disabled={i === 0} title="Move fallback {i + 1} up" aria-label="Move fallback {i + 1} up">Move up</button>
+                <button type="button" class="fallback-card__move" onclick={() => moveFallback(i, i + 1)} disabled={i === fallbackModels.length - 1} title="Move fallback {i + 1} down" aria-label="Move fallback {i + 1} down">Move down</button>
                 <button type="button" class="fallback-card__switch" onclick={() => onSwitchMain(i)} disabled={!entry.model}>Switch as Main</button>
                 <button type="button" class="fallback-card__remove" onclick={() => onRemoveFallback(i)}>Remove</button>
               </div>
             </div>
             <div class="fallback-card__row">
               <div class="field">
-                <label class="field__label" for="fb-model-{i}">Model</label>
-                <input class="field__input field__input--mono" type="text" id="fb-model-{i}" list="model-datalist" placeholder="provider/model-name" spellcheck="false" autocapitalize="off" autocorrect="off" bind:value={entry.model} oninput={onFieldChange} />
+                <label class="field__label" for="fb-model-{entry.__uid}">Model</label>
+                <input class="field__input field__input--mono" type="text" id="fb-model-{entry.__uid}" list="model-datalist" placeholder="provider/model-name" spellcheck="false" autocapitalize="off" autocorrect="off" bind:value={entry.model} oninput={onFieldChange} />
               </div>
               <div class="field">
-                <label class="field__label" for="fb-variant-{i}">Variant</label>
-                <select class="field__input" id="fb-variant-{i}" bind:value={entry.variant} onchange={onFieldChange}>
+                <label class="field__label" for="fb-variant-{entry.__uid}">Variant</label>
+                <select class="field__input" id="fb-variant-{entry.__uid}" bind:value={entry.variant} onchange={onFieldChange}>
                   <option value="">(default)</option>
                   {#each FALLBACK_VARIANTS as v}
                     <option value={v}>{v}</option>
@@ -538,8 +606,8 @@
                 </select>
               </div>
               <div class="field">
-                <label class="field__label" for="fb-reasoning-{i}">Reasoning</label>
-                <select class="field__input" id="fb-reasoning-{i}" bind:value={entry.reasoningEffort} onchange={onFieldChange}>
+                <label class="field__label" for="fb-reasoning-{entry.__uid}">Reasoning</label>
+                <select class="field__input" id="fb-reasoning-{entry.__uid}" bind:value={entry.reasoningEffort} onchange={onFieldChange}>
                   <option value="">(default)</option>
                   {#each FALLBACK_REASONING as r}
                     <option value={r}>{r}</option>
@@ -549,26 +617,26 @@
             </div>
             <div class="fallback-card__row fallback-card__row--sampling">
               <div class="field">
-                <label class="field__label" for="fb-temperature-{i}">Temperature</label>
-                <input class="field__input" type="number" id="fb-temperature-{i}" step="0.1" min="0" max="2" bind:value={entry.temperature} oninput={onFieldChange} />
+                <label class="field__label" for="fb-temperature-{entry.__uid}">Temperature</label>
+                <input class="field__input" type="number" id="fb-temperature-{entry.__uid}" step="0.1" min="0" max="2" bind:value={entry.temperature} oninput={onFieldChange} />
               </div>
               <div class="field">
-                <label class="field__label" for="fb-top-p-{i}">Top-p</label>
-                <input class="field__input" type="number" id="fb-top-p-{i}" step="0.05" min="0" max="1" bind:value={entry.top_p} oninput={onFieldChange} />
+                <label class="field__label" for="fb-top-p-{entry.__uid}">Top-p</label>
+                <input class="field__input" type="number" id="fb-top-p-{entry.__uid}" step="0.05" min="0" max="1" bind:value={entry.top_p} oninput={onFieldChange} />
               </div>
               <div class="field">
-                <label class="field__label" for="fb-max-tokens-{i}">Max tokens</label>
-                <input class="field__input" type="number" id="fb-max-tokens-{i}" step="1" min="1" bind:value={entry.maxTokens} oninput={onFieldChange} />
+                <label class="field__label" for="fb-max-tokens-{entry.__uid}">Max tokens</label>
+                <input class="field__input" type="number" id="fb-max-tokens-{entry.__uid}" step="1" min="1" bind:value={entry.maxTokens} oninput={onFieldChange} />
               </div>
             </div>
             <div class="fallback-card__row fallback-card__row--thinking">
               <div class="fallback-card__checkbox">
-                <input type="checkbox" id="fb-thinking-{i}" bind:checked={entry.thinking} onchange={onFieldChange} />
-                <label for="fb-thinking-{i}">Enable thinking</label>
+                <input type="checkbox" id="fb-thinking-{entry.__uid}" bind:checked={entry.thinking} onchange={onFieldChange} />
+                <label for="fb-thinking-{entry.__uid}">Enable thinking</label>
               </div>
               <div class="field">
-                <label class="field__label" for="fb-budget-{i}">Budget tokens</label>
-                <input class="field__input" type="number" id="fb-budget-{i}" step="1" min="1" bind:value={entry.thinking.budgetTokens} disabled={!entry.thinking} oninput={onFieldChange} />
+                <label class="field__label" for="fb-budget-{entry.__uid}">Budget tokens</label>
+                <input class="field__input" type="number" id="fb-budget-{entry.__uid}" step="1" min="1" bind:value={entry.thinking.budgetTokens} disabled={!entry.thinking} oninput={onFieldChange} />
               </div>
             </div>
           </div>
@@ -609,6 +677,11 @@
   .editor__form { display: flex; flex-direction: column; gap: 18px; }
   .editor__section { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px 18px; background: var(--vscode-sideBar-background, transparent); border: 1px solid var(--vscode-widget-border); border-radius: 4px; }
   .editor__section-header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 2px; }
+  .editor__section-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin: 0 0 2px; padding: 0; font: inherit; color: inherit; text-align: left; background: transparent; border: 0; cursor: pointer; }
+  .editor__section-toggle .editor__section-header { margin-bottom: 0; }
+  .editor__section-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+  .editor__section-chevron { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--vscode-descriptionForeground); transition: transform 120ms ease; }
+  .editor__section-chevron.expanded { transform: rotate(90deg); }
   .editor__section-title { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--vscode-foreground); }
   .editor__section-desc { margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
   .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -641,12 +714,21 @@
   .vscode-button--icon { display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; }
   .fallback-list { display: flex; flex-direction: column; gap: 10px; }
   .fallback-card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--vscode-input-background); border: 1px solid var(--vscode-widget-border); border-radius: 3px; }
+  .fallback-card.dragging { opacity: 0.55; }
+  .fallback-card.drag-over { border-top-color: var(--vscode-focusBorder); box-shadow: inset 0 2px 0 var(--vscode-focusBorder); }
   .fallback-card__row { display: grid; grid-template-columns: 1fr 140px 140px; gap: 8px; align-items: end; }
   .fallback-card__row--sampling { grid-template-columns: 1fr 1fr 1fr; }
   .fallback-card__row--thinking { grid-template-columns: 1fr 1fr; align-items: center; }
   .fallback-card__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .fallback-card__heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .fallback-card__handle { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; color: var(--vscode-descriptionForeground); background: transparent; border: 1px solid var(--vscode-widget-border); border-radius: 2px; cursor: grab; }
+  .fallback-card__handle:active { cursor: grabbing; }
+  .fallback-card__handle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
   .fallback-card__title { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--vscode-descriptionForeground); }
   .fallback-card__actions { display: flex; align-items: center; gap: 6px; }
+  .fallback-card__move { background: transparent; border: 1px solid var(--vscode-widget-border); color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: 2px; }
+  .fallback-card__move:hover:not(:disabled) { color: var(--vscode-textLink-foreground); border-color: var(--vscode-textLink-foreground); }
+  .fallback-card__move:disabled { opacity: 0.4; cursor: not-allowed; }
   .fallback-card__switch { background: transparent; border: 1px solid var(--vscode-textLink-foreground); color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 11px; padding: 2px 8px; border-radius: 2px; font-weight: 500; }
   .fallback-card__switch:hover { background: var(--vscode-textLink-foreground); color: var(--vscode-button-foreground, #fff); }
   .fallback-card__switch:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--vscode-descriptionForeground); color: var(--vscode-descriptionForeground); }

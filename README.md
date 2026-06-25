@@ -90,9 +90,8 @@ The **Profiles** group always shows the active state: when no profile is active,
 2. The webview editor opens with sections for Model, Sampling, Thinking, and Fallback models.
 3. The Model field is a free-form text input with a lazy datalist. While the editor loads, the extension runs `opencode models --verbose` locally and offers the returned model IDs as autocomplete suggestions, together with each model's capabilities and variants. Any existing model value is preserved, even if it is not in the discovered list.
 4. Hover over the reload button next to the Model field to re-run discovery and refresh the model list at any time.
-5. As you change the Model value, the corresponding sidebar leaf updates immediately to show the new model before you save.
-6. Change values and click **Save**. The active config is updated with JSONC preservation. Fields that exist in the config but are not exposed in the form (such as `permission`, `tools`, `prompt`, `providerOptions`, and rich `fallback_models`) are preserved rather than overwritten.
-7. Hover over any agent or category leaf in the sidebar to see a tooltip with the configured parameters (temperature, top-p, max tokens, reasoning effort, thinking budget, variant, and fallback models).
+5. Change values and click **Save**. The active config is updated with JSONC preservation, and the sidebar refreshes from the saved config/profile state after the write completes. Fields that exist in the config but are not exposed in the form (such as `permission`, `tools`, `prompt`, `providerOptions`, and rich `fallback_models`) are preserved rather than overwritten.
+6. Hover over any agent or category leaf in the sidebar to see a tooltip with the configured parameters (temperature, top-p, max tokens, reasoning effort, thinking budget, variant, and fallback models).
 
 ### Context menu actions
 
@@ -212,13 +211,18 @@ To run the extension locally, press `F5` in VS Code. This opens the Extension De
 
 ### Tests
 
-Tests are written with Vitest and currently run **59 tests across 3 test suites**:
+Tests are written with Vitest and currently run **152 tests across 8 test files**:
 
 | Suite | Tests | What it covers |
 |-------|-------|----------------|
-| `configStore.test.ts` | 11 | Config discovery, JSONC parsing, formatting-preserving updates, key removal, file watching |
+| `modelDiscovery.test.ts` | 31 | `opencode models` parsing, fallback handling, metadata normalization, cache behavior |
+| `agentModelTreeProvider.test.ts` | 24 | Tree group structure, context-value mapping, override detection, active profile indicator, refresh, dispose |
+| `agentEditorPanel.test.ts` | 32 | Webview panel lifecycle, message handling, save writes, profile creation, model discovery reloads |
 | `profileStore.test.ts` | 34 | Profile CRUD, rename, duplicate, deep-clone isolation, activation with JSONC preservation, change events |
-| `agentModelTreeProvider.test.ts` | 14 | Tree group structure, context-value mapping, override detection, active profile indicator, refresh, dispose |
+| `smoke.test.ts` | 1 | End-to-end editor save flow across stores, panel, tree, and JSONC writes |
+| `packageMenus.test.ts` | 2 | Package contribution menu wiring for view item actions |
+| `configStore.test.ts` | 13 | Config discovery, JSONC parsing, formatting-preserving updates, key removal, file watching |
+| `webview.test.ts` | 15 | Webview model picker behavior, save payloads, fallback editing, persisted state |
 
 The JSONC preservation tests verify that comments, trailing commas, and formatting survive round-trips through `updateConfig()` and profile activation — confirmed against real config fixtures with inline comments and trailing commas.
 

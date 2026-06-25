@@ -550,6 +550,57 @@ function makeMockConfigStore(): ConfigStore {
   } as unknown as ConfigStore;
 }
 
+function makeProfileAwareConfigStore(): ConfigStore & {
+  readonly getAgentMock: ReturnType<typeof vi.fn>;
+  readonly updateConfigMock: ReturnType<typeof vi.fn>;
+} {
+  const getAgentMock = vi.fn(() => ({ model: 'active-config/model' }));
+  const updateConfigMock = vi.fn(async () => {});
+  return {
+    onDidChange: new EventEmitter(),
+    getAgent: getAgentMock,
+    getCategory: vi.fn(() => undefined),
+    updateConfig: updateConfigMock,
+    getAgentMock,
+    updateConfigMock,
+  } as unknown as ConfigStore & {
+    readonly getAgentMock: ReturnType<typeof vi.fn>;
+    readonly updateConfigMock: ReturnType<typeof vi.fn>;
+  };
+}
+
+function makeProfileAwareProfileStore(): ProfileStore & {
+  readonly getProfileMock: ReturnType<typeof vi.fn>;
+  readonly updateProfileEntryMock: ReturnType<typeof vi.fn>;
+} {
+  const getProfileMock = vi.fn((name: string) =>
+    name === 'fast'
+      ? {
+          name: 'fast',
+          agents: {
+            sisyphus: { model: 'profile/model', prompt: 'from profile' },
+          },
+          categories: {
+            quick: { model: 'profile/category' },
+          },
+        }
+      : undefined,
+  );
+  const updateProfileEntryMock = vi.fn(async () => ({ name: 'fast' }));
+  return {
+    onDidChange: new EventEmitter(),
+    listProfiles: () => [],
+    getActiveProfileName: () => undefined,
+    getProfile: getProfileMock,
+    updateProfileEntry: updateProfileEntryMock,
+    getProfileMock,
+    updateProfileEntryMock,
+  } as unknown as ProfileStore & {
+    readonly getProfileMock: ReturnType<typeof vi.fn>;
+    readonly updateProfileEntryMock: ReturnType<typeof vi.fn>;
+  };
+}
+
 function makeMockProfileStore(): ProfileStore {
   return {
     onDidChange: new EventEmitter(),
@@ -652,13 +703,12 @@ describe('AgentEditorPanel integration', () => {
     expect(calls).toContainEqual([{ verbose: true, forceRefresh: true }]);
   });
 
-  it('sets a tree preview when modelChanged is received', async () => {
-    const { panel, listeners } = makeMockWebviewPanel();
-    const configStore = makeMockConfigStore();
-    const profileStore = makeMockProfileStore();
+  it('initializes profile-context agent edits from ProfileStore', async () => {
+    const { panel, sendReady, messages } = makeMockWebviewPanel();
+    const configStore = makeProfileAwareConfigStore();
+    const profileStore = makeProfileAwareProfileStore();
     const modelDiscovery = makeMockModelDiscovery();
     const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
-    const setPreviewSpy = vi.spyOn(treeProvider, 'setPreview');
 
     vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
 
@@ -668,65 +718,57 @@ describe('AgentEditorPanel integration', () => {
       profileStore,
       modelDiscovery,
       treeProvider,
-      { type: 'agent', name: 'sisyphus' },
+      { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    );
+
+    sendReady();
+
+    const initMessage = messages.find(
+      (message): message is { command: string; config: AgentConfig | null } =>
+        typeof message === 'object' &&
+        message !== null &&
+        (message as { command?: unknown }).command === 'init',
+    );
+    expect(initMessage?.config).toEqual({
+      model: 'profile/model',
+      prompt: 'from profile',
+    });
+    expect(profileStore.getProfileMock).toHaveBeenCalledWith('fast');
+    expect(configStore.getAgentMock).not.toHaveBeenCalled();
+  });
+
+  it('saves profile-context agent edits through ProfileStore only', async () => {
+    const { panel, listeners, messages } = makeMockWebviewPanel();
+    const configStore = makeProfileAwareConfigStore();
+    const profileStore = makeProfileAwareProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus', profile: 'fast' },
     );
 
     for (const listener of listeners) {
-      listener({ command: 'modelChanged', modelId: 'openai/gpt-5' });
+      listener({ command: 'save', payload: { model: 'profile/new', prompt: null } });
     }
+    await new Promise((resolve) => setImmediate(resolve));
 
-    expect(setPreviewSpy).toHaveBeenCalledWith('agents', 'sisyphus', 'openai/gpt-5');
-  });
-
-  it('clears the tree preview after a successful save', async () => {
-    const { panel, listeners } = makeMockWebviewPanel();
-    const configStore = makeMockConfigStore();
-    const profileStore = makeMockProfileStore();
-    const modelDiscovery = makeMockModelDiscovery();
-    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
-    const clearPreviewSpy = vi.spyOn(treeProvider, 'clearPreview');
-
-    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
-
-    AgentEditorPanel.show(
-      makeExtensionContext(extensionPath),
-      configStore,
-      profileStore,
-      modelDiscovery,
-      treeProvider,
-      { type: 'agent', name: 'sisyphus' },
+    expect(profileStore.updateProfileEntryMock).toHaveBeenCalledWith(
+      'fast',
+      'agents',
+      'sisyphus',
+      { model: 'profile/new' },
+      new Set(['prompt']),
     );
-
-    for (const listener of listeners) {
-      await listener({ command: 'save', payload: { model: 'openai/gpt-5' } });
-    }
-
-    expect(clearPreviewSpy).toHaveBeenCalledWith('agents', 'sisyphus');
+    expect(configStore.updateConfigMock).not.toHaveBeenCalled();
+    expect(messages).toContainEqual({ command: 'saved' });
   });
 
-  it('clears the tree preview when the panel is disposed', async () => {
-    const { panel, disposeListeners } = makeMockWebviewPanel();
-    const configStore = makeMockConfigStore();
-    const profileStore = makeMockProfileStore();
-    const modelDiscovery = makeMockModelDiscovery();
-    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
-    const clearPreviewSpy = vi.spyOn(treeProvider, 'clearPreview');
-
-    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
-
-    AgentEditorPanel.show(
-      makeExtensionContext(extensionPath),
-      configStore,
-      profileStore,
-      modelDiscovery,
-      treeProvider,
-      { type: 'agent', name: 'sisyphus' },
-    );
-
-    for (const fn of disposeListeners) {
-      fn();
-    }
-
-    expect(clearPreviewSpy).toHaveBeenCalledWith('agents', 'sisyphus');
-  });
 });

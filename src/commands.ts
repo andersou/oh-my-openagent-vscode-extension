@@ -69,10 +69,16 @@ export function registerCommands(
           );
           return;
         }
-        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, treeProvider, {
-          type: 'agent',
-          name: item.nodeName,
-        });
+        AgentEditorPanel.show(
+          context,
+          configStore,
+          profileStore,
+          modelDiscovery,
+          treeProvider,
+          item.profileName === undefined
+            ? { type: 'agent', name: item.nodeName }
+            : { type: 'agent', name: item.nodeName, profile: item.profileName },
+        );
       },
     ),
 
@@ -86,10 +92,16 @@ export function registerCommands(
           );
           return;
         }
-        AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, treeProvider, {
-          type: 'category',
-          name: item.nodeName,
-        });
+        AgentEditorPanel.show(
+          context,
+          configStore,
+          profileStore,
+          modelDiscovery,
+          treeProvider,
+          item.profileName === undefined
+            ? { type: 'category', name: item.nodeName }
+            : { type: 'category', name: item.nodeName, profile: item.profileName },
+        );
       },
     ),
 

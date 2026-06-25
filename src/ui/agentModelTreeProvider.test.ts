@@ -252,6 +252,19 @@ describe('AgentModelTreeProvider', () => {
     expect(agentItems.map((c) => c.label)).toEqual(['sisyphus \u2192 openai/gpt-4']);
     expect(agentItems[0].kind).toBe('agent');
     expect(agentItems[0].contextValue).toBe('agent');
+    expect(agentItems[0].profileName).toBe('fast');
+    expect(agentItems[0].command).toEqual({
+      command: 'ohMyOpenAgent.editAgent',
+      title: 'Edit',
+      arguments: [
+        {
+          kind: 'agent',
+          nodeName: 'sisyphus',
+          group: 'agents',
+          profileName: 'fast',
+        },
+      ],
+    });
     expect((agentItems[0].iconPath as { id: string }).id).toBe('person');
 
     const categoriesGroup = subGroups.find((c) => c.nodeName === 'fast:categories')!;
@@ -259,6 +272,19 @@ describe('AgentModelTreeProvider', () => {
     expect(categoryItems.map((c) => c.label)).toEqual(['quick \u2192 openai/gpt-3.5']);
     expect(categoryItems[0].kind).toBe('category');
     expect(categoryItems[0].contextValue).toBe('category');
+    expect(categoryItems[0].profileName).toBe('fast');
+    expect(categoryItems[0].command).toEqual({
+      command: 'ohMyOpenAgent.editCategory',
+      title: 'Edit',
+      arguments: [
+        {
+          kind: 'category',
+          nodeName: 'quick',
+          group: 'categories',
+          profileName: 'fast',
+        },
+      ],
+    });
     expect((categoryItems[0].iconPath as { id: string }).id).toBe('tag');
   });
 
@@ -484,46 +510,4 @@ describe('AgentModelTreeProvider', () => {
     });
   });
 
-  describe('transient model preview', () => {
-    it('overrides the displayed model without mutating config', () => {
-      configStore = makeConfigStoreStub({
-        sisyphus: { model: 'openai/gpt-4' },
-      });
-      provider = new AgentModelTreeProvider(configStore, profileStore);
-      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
-
-      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
-      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
-      expect(sisyphus.label).toBe('sisyphus \u2192 openai/gpt-5');
-      expect(configStore.getAgent('sisyphus')?.model).toBe('openai/gpt-4');
-    });
-
-    it('clears a preview and reverts to the saved model', () => {
-      configStore = makeConfigStoreStub({
-        sisyphus: { model: 'openai/gpt-4' },
-      });
-      provider = new AgentModelTreeProvider(configStore, profileStore);
-      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
-      provider.clearPreview('agents', 'sisyphus');
-
-      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
-      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
-      expect(sisyphus.label).toBe('sisyphus \u2192 openai/gpt-4');
-    });
-
-    it('fires onDidChangeTreeData when a preview is set', () => {
-      const seen: number[] = [];
-      provider.onDidChangeTreeData(() => seen.push(1));
-      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
-      expect(seen).toHaveLength(1);
-    });
-
-    it('fires onDidChangeTreeData when previews are cleared', () => {
-      provider.setPreview('agents', 'sisyphus', 'openai/gpt-5');
-      const seen: number[] = [];
-      provider.onDidChangeTreeData(() => seen.push(1));
-      provider.clearAllPreviews();
-      expect(seen).toHaveLength(1);
-    });
-  });
 });
