@@ -513,11 +513,11 @@
         <div class="field-grid field-grid--three">
         <div class="field">
           <label class="field__label" for="f-temperature">Temperature</label>
-          <input class="field__input" type="number" id="f-temperature" name="temperature" step="0.1" min="0" max="2" inputmode="decimal" placeholder="0.0 \u2013 2.0" bind:value={temperature} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support temperature.'} />
+          <input class="field__input" type="number" id="f-temperature" name="temperature" step="0.1" min="0" max="2" inputmode="decimal" placeholder="0.0 – 2.0" bind:value={temperature} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support temperature.'} />
         </div>
         <div class="field">
           <label class="field__label" for="f-top-p">Top-p</label>
-          <input class="field__input" type="number" id="f-top-p" name="top_p" step="0.05" min="0" max="1" inputmode="decimal" placeholder="0.0 \u2013 1.0" bind:value={topP} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support sampling parameters.'} />
+          <input class="field__input" type="number" id="f-top-p" name="top_p" step="0.05" min="0" max="1" inputmode="decimal" placeholder="0.0 – 1.0" bind:value={topP} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support sampling parameters.'} />
         </div>
         <div class="field">
           <label class="field__label" for="f-max-tokens">Max tokens</label>
