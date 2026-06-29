@@ -5,6 +5,7 @@ import { BUILTIN_AGENTS, BUILTIN_CATEGORIES } from '../config/schema.js';
 import type { ConfigStore } from '../config/configStore.js';
 import type { ProfileStore } from '../config/profileStore.js';
 import type { Profile } from '../config/schema.js';
+import type { ActiveProfileModification } from '../config/profileStore.js';
 
 // ---------------------------------------------------------------------------
 // vscode mock — must be set up before importing the provider.
@@ -81,6 +82,7 @@ function makeProfileStoreStub(
   profiles: Profile[] = [],
   active: string | undefined = undefined,
   modified = false,
+  modifications: ActiveProfileModification[] = [],
 ): ProfileStore {
   return {
     onDidChange: new EventEmitter(),
@@ -88,6 +90,7 @@ function makeProfileStoreStub(
     getActiveProfileName: () => active,
     getProfile: (name: string) => profiles.find((p) => p.name === name),
     isActiveProfileModified: () => modified,
+    getActiveProfileModifications: () => modifications,
   } as unknown as ProfileStore;
 }
 
@@ -543,6 +546,28 @@ describe('AgentModelTreeProvider', () => {
         .find((r) => r.kind === 'activeProfile')!;
       expect(activeItem.label).toBe('fast *');
       expect(activeItem.contextValue).toBe('activeProfileModified');
+    });
+
+    it('shows a collapsible summary of modifications when dirty', () => {
+      const modifications: ActiveProfileModification[] = [
+        { group: 'agents', name: 'sisyphus', type: 'modified', changedFields: ['model', 'temperature'] },
+        { group: 'categories', name: 'deep', type: 'added' },
+      ];
+      profileStore = makeProfileStoreStub(
+        [{ name: 'fast' }],
+        'fast',
+        true,
+        modifications,
+      );
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const activeItem = provider
+        .getChildren()
+        .find((r) => r.kind === 'activeProfile')!;
+      expect(activeItem.collapsibleState).toBe(1);
+      expect(activeItem.children?.map((child) => child.label)).toEqual([
+        '~ agent sisyphus: model, temperature',
+        '+ category deep',
+      ]);
     });
 
     it('omits the active-profile item when the active name is not in the list', () => {

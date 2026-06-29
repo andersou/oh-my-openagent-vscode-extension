@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConfigStore } from '../config/configStore.js';
 import { ProfileStore } from '../config/profileStore.js';
+import type { ActiveProfileModification } from '../config/profileStore.js';
 import {
   BUILTIN_AGENTS,
   BUILTIN_CATEGORIES,
@@ -316,9 +317,14 @@ export class AgentModelTreeProvider
     if (profile === undefined) return undefined;
 
     const modified = this.profileStore.isActiveProfileModified();
+    const modifications = modified
+      ? this.profileStore.getActiveProfileModifications()
+      : [];
     const item = new vscode.TreeItem(
       modified ? `${active} *` : active,
-      vscode.TreeItemCollapsibleState.None,
+      modifications.length > 0
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
     ) as AgentModelTreeItem;
     item.kind = 'activeProfile';
     item.id = '__omo_active_profile__';
@@ -329,6 +335,33 @@ export class AgentModelTreeProvider
     item.tooltip = modified
       ? `Active profile "${active}" has unsaved config changes. Use Save Active Profile to persist them.`
       : `Active profile: ${active}`;
+    item.children = modifications.map((m) =>
+      this.createActiveProfileModificationChild(m),
+    );
+    return item;
+  }
+
+  private createActiveProfileModificationChild(
+    mod: ActiveProfileModification,
+  ): AgentModelTreeItem {
+    const groupLabel = mod.group === 'agents' ? 'agent' : 'category';
+    const details =
+      mod.type === 'modified' && mod.changedFields && mod.changedFields.length > 0
+        ? `: ${mod.changedFields.join(', ')}`
+        : '';
+    const prefix =
+      mod.type === 'added' ? '+' : mod.type === 'removed' ? '-' : '~';
+    const item = new vscode.TreeItem(
+      `${prefix} ${groupLabel} ${mod.name}${details}`,
+      vscode.TreeItemCollapsibleState.None,
+    ) as AgentModelTreeItem;
+    item.kind = 'detail';
+    item.id = `activeProfile:mod:${mod.group}:${mod.name}:${mod.type}`;
+    item.contextValue = 'detail';
+    item.iconPath = new vscode.ThemeIcon(
+      mod.type === 'added' ? 'add' : mod.type === 'removed' ? 'trash' : 'edit',
+    );
+    item.tooltip = `${mod.group === 'agents' ? 'Agent' : 'Category'} "${mod.name}" ${mod.type}${details}`;
     return item;
   }
 

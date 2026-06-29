@@ -52,6 +52,13 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return true;
 }
 
+export interface ActiveProfileModification {
+  group: 'agents' | 'categories';
+  name: string;
+  type: 'added' | 'removed' | 'modified';
+  changedFields?: string[];
+}
+
 // ---------------------------------------------------------------------------
 // ProfileStore
 // ---------------------------------------------------------------------------
@@ -376,6 +383,66 @@ export class ProfileStore {
    */
   getActiveProfileName(): string | undefined {
     return this.readProfilesFile().lastActiveProfile;
+  }
+
+  /**
+   * Return a structured list of differences between the active profile's
+   * stored snapshot and the live config. Each entry describes whether an
+   * agent/category was added, removed, or modified (with changed field
+   * names). Returns an empty array when no profile is active or unchanged.
+   */
+  getActiveProfileModifications(): ActiveProfileModification[] {
+    const active = this.getActiveProfileName();
+    if (active === undefined) return [];
+    const profile = this.getProfile(active);
+    if (profile === undefined) return [];
+    const config = this.configStore.getConfig();
+    return [
+      ...this.diffGroup('agents', profile.agents ?? {}, config.agents ?? {}),
+      ...this.diffGroup('categories', profile.categories ?? {}, config.categories ?? {}),
+    ];
+  }
+
+  private diffGroup(
+    group: 'agents' | 'categories',
+    profileEntries: Record<string, AgentConfig | CategoryConfig>,
+    configEntries: Record<string, AgentConfig | CategoryConfig>,
+  ): ActiveProfileModification[] {
+    const result: ActiveProfileModification[] = [];
+    const allKeys = new Set([
+      ...Object.keys(profileEntries),
+      ...Object.keys(configEntries),
+    ]);
+    for (const name of allKeys) {
+      const inProfile = profileEntries[name];
+      const inConfig = configEntries[name];
+      if (inProfile === undefined) {
+        result.push({ group, name, type: 'added' });
+      } else if (inConfig === undefined) {
+        result.push({ group, name, type: 'removed' });
+      } else if (!deepEqual(inProfile, inConfig)) {
+        const changedFields = this.diffFieldNames(
+          inProfile as Record<string, unknown>,
+          inConfig as Record<string, unknown>,
+        );
+        result.push({ group, name, type: 'modified', changedFields });
+      }
+    }
+    return result.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private diffFieldNames(
+    a: Record<string, unknown>,
+    b: Record<string, unknown>,
+  ): string[] {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    const changed: string[] = [];
+    for (const key of keys) {
+      if (!deepEqual(a[key], b[key])) {
+        changed.push(key);
+      }
+    }
+    return changed.sort();
   }
 
   /**
