@@ -26,6 +26,7 @@ export type AgentModelItemKind =
   | 'fallbackGroup'
   | 'fallback'
   | 'configFile'
+  | 'activeProfile'
   | 'noActiveProfile';
 
 /**
@@ -156,12 +157,17 @@ export class AgentModelTreeProvider
 
   getChildren(element?: AgentModelTreeItem): AgentModelTreeItem[] {
     if (!element) {
-      return [
-        this.createConfigFileItem(),
+      const roots: AgentModelTreeItem[] = [this.createConfigFileItem()];
+      const activeProfile = this.createActiveProfileItem();
+      if (activeProfile) {
+        roots.push(activeProfile);
+      }
+      roots.push(
         this.createGroup('Agents', 'agents'),
         this.createGroup('Categories', 'categories'),
         this.createGroup('Profiles', 'profiles'),
-      ];
+      );
+      return roots;
     }
     if (element.children) {
       return element.children;
@@ -300,6 +306,29 @@ export class AgentModelTreeProvider
     item.contextValue = 'configFile';
     item.iconPath = new vscode.ThemeIcon('file-code');
     item.tooltip = configPath;
+    return item;
+  }
+
+  private createActiveProfileItem(): AgentModelTreeItem | undefined {
+    const active = this.profileStore.getActiveProfileName();
+    if (active === undefined) return undefined;
+    const profile = this.profileStore.getProfile(active);
+    if (profile === undefined) return undefined;
+
+    const modified = this.profileStore.isActiveProfileModified();
+    const item = new vscode.TreeItem(
+      modified ? `${active} *` : active,
+      vscode.TreeItemCollapsibleState.None,
+    ) as AgentModelTreeItem;
+    item.kind = 'activeProfile';
+    item.id = '__omo_active_profile__';
+    item.nodeName = active;
+    item.contextValue = modified ? 'activeProfileModified' : 'activeProfile';
+    item.iconPath = new vscode.ThemeIcon('check');
+    item.description = modified ? 'unsaved changes' : '(active)';
+    item.tooltip = modified
+      ? `Active profile "${active}" has unsaved config changes. Use Save Active Profile to persist them.`
+      : `Active profile: ${active}`;
     return item;
   }
 

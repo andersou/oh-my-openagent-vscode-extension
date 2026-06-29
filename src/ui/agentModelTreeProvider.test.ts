@@ -80,11 +80,14 @@ function makeConfigStoreStub(
 function makeProfileStoreStub(
   profiles: Profile[] = [],
   active: string | undefined = undefined,
+  modified = false,
 ): ProfileStore {
   return {
     onDidChange: new EventEmitter(),
     listProfiles: () => profiles,
     getActiveProfileName: () => active,
+    getProfile: (name: string) => profiles.find((p) => p.name === name),
+    isActiveProfileModified: () => modified,
   } as unknown as ProfileStore;
 }
 
@@ -507,6 +510,47 @@ describe('AgentModelTreeProvider', () => {
       expect(provider.getChildren(fallbackGroup).map((child) => child.label)).toEqual([
         'fallback/model',
       ]);
+    });
+  });
+
+  describe('active profile indicator', () => {
+    it('omits the active-profile item when no profile is active', () => {
+      profileStore = makeProfileStoreStub([{ name: 'fast' }], undefined);
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const roots = provider.getChildren();
+      expect(roots.some((r) => r.kind === 'activeProfile')).toBe(false);
+      expect(roots).toHaveLength(4);
+    });
+
+    it('shows the active profile name below the config file when one is active', () => {
+      profileStore = makeProfileStoreStub([{ name: 'fast' }], 'fast', false);
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const roots = provider.getChildren();
+      expect(roots[0].kind).toBe('configFile');
+      const activeItem = roots[1];
+      expect(activeItem.kind).toBe('activeProfile');
+      expect(activeItem.label).toBe('fast');
+      expect(activeItem.contextValue).toBe('activeProfile');
+      expect(activeItem.nodeName).toBe('fast');
+      expect((activeItem.iconPath as { id: string }).id).toBe('check');
+    });
+
+    it('appends "*" and flips contextValue when the active profile is modified', () => {
+      profileStore = makeProfileStoreStub([{ name: 'fast' }], 'fast', true);
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const activeItem = provider
+        .getChildren()
+        .find((r) => r.kind === 'activeProfile')!;
+      expect(activeItem.label).toBe('fast *');
+      expect(activeItem.contextValue).toBe('activeProfileModified');
+    });
+
+    it('omits the active-profile item when the active name is not in the list', () => {
+      profileStore = makeProfileStoreStub([{ name: 'fast' }], 'ghost');
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      expect(
+        provider.getChildren().some((r) => r.kind === 'activeProfile'),
+      ).toBe(false);
     });
   });
 

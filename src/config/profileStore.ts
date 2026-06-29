@@ -19,6 +19,39 @@ function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/** Order-independent structural equality for plain JSON values. */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (
+    typeof a !== 'object' ||
+    typeof b !== 'object' ||
+    a === null ||
+    b === null
+  ) {
+    return false;
+  }
+  const aArray = Array.isArray(a);
+  const bArray = Array.isArray(b);
+  if (aArray !== bArray) return false;
+  if (aArray && bArray) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(bObj, key)) return false;
+    if (!deepEqual(aObj[key], bObj[key])) return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // ProfileStore
 // ---------------------------------------------------------------------------
@@ -343,5 +376,56 @@ export class ProfileStore {
    */
   getActiveProfileName(): string | undefined {
     return this.readProfilesFile().lastActiveProfile;
+  }
+
+  /**
+   * Return `true` when an active profile's stored `agents` / `categories`
+   * snapshot no longer matches the live config — i.e. the config was edited
+   * since the profile was last activated or saved. Comparison is key-order
+   * independent. Returns `false` when no profile is active.
+   */
+  isActiveProfileModified(): boolean {
+    const active = this.getActiveProfileName();
+    if (active === undefined) return false;
+    const profile = this.getProfile(active);
+    if (profile === undefined) return false;
+    const config = this.configStore.getConfig();
+    return (
+      !deepEqual(profile.agents ?? {}, config.agents ?? {}) ||
+      !deepEqual(profile.categories ?? {}, config.categories ?? {})
+    );
+  }
+
+  /**
+   * Snapshot the live config's `agents` / `categories` into the active
+   * profile, overwriting whatever was stored, and bump `updatedAt`. The
+   * inverse of {@link activateProfile}. Throws when no profile is active.
+   */
+  async saveActiveConfigToProfile(): Promise<Profile> {
+    const active = this.getActiveProfileName();
+    if (active === undefined) {
+      throw new Error('No active profile to save into');
+    }
+    const data = this.readProfilesFile();
+    const profile = data.profiles.find((p) => p.name === active);
+    if (!profile) {
+      throw new Error(`Active profile "${active}" not found`);
+    }
+
+    const config = this.configStore.getConfig();
+    if (config.agents) {
+      profile.agents = deepClone(config.agents);
+    } else {
+      delete profile.agents;
+    }
+    if (config.categories) {
+      profile.categories = deepClone(config.categories);
+    } else {
+      delete profile.categories;
+    }
+    profile.updatedAt = new Date().toISOString();
+
+    await this.writeProfilesFile(data);
+    return profile;
   }
 }

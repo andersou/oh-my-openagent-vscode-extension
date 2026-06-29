@@ -401,6 +401,28 @@ export function registerCommands(
         }
       },
     ),
+
+    // 14. Snapshot the live config back into the active profile.
+    vscode.commands.registerCommand(
+      'ohMyOpenAgent.saveActiveProfile',
+      async () => {
+        const active = profileStore.getActiveProfileName();
+        if (active === undefined) {
+          void vscode.window.showWarningMessage(
+            'No active profile to save into. Activate a profile first.',
+          );
+          return;
+        }
+        try {
+          await profileStore.saveActiveConfigToProfile();
+          void vscode.window.showInformationMessage(
+            `Profile "${active}" updated from the active config.`,
+          );
+        } catch (err) {
+          reportError('Failed to save active profile', err);
+        }
+      },
+    ),
   ];
 
   return vscode.Disposable.from(...commands);
