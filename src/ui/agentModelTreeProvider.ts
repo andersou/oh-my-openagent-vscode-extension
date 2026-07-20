@@ -48,8 +48,6 @@ export interface AgentModelTreeItem extends vscode.TreeItem {
   /** Profile context for profile-nested agent/category leaves. */
   profileName?: string;
   children?: AgentModelTreeItem[];
-  /** For fallback model entries: the index within the parent's fallback_models array. */
-  fallbackIndex?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,7 +553,6 @@ export class AgentModelTreeProvider
       item.kind = 'fallback';
       item.group = group;
       item.nodeName = name;
-      item.fallbackIndex = index;
       item.id = `${group}:${name}:fallback:${index}`;
       item.contextValue = 'fallbackModel';
       item.iconPath = new vscode.ThemeIcon('debug-step-over');

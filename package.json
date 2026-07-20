@@ -11,14 +11,11 @@
     "url": "https://github.com/andersou/oh-my-openagent-vscode-extension.git"
   },
   "engines": {
+    "node": ">=22",
     "vscode": "^1.85.0"
   },
   "categories": [
     "Other"
-  ],
-  "activationEvents": [
-    "onCommand:ohMyOpenAgent.openAgentManager",
-    "onView:ohMyOpenAgent.models"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -63,16 +60,6 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "ohMyOpenAgent.addAgentOverride",
-        "title": "Add Agent Override",
-        "category": "Oh My OpenAgent"
-      },
-      {
-        "command": "ohMyOpenAgent.addCategoryOverride",
-        "title": "Add Category Override",
-        "category": "Oh My OpenAgent"
-      },
-      {
         "command": "ohMyOpenAgent.removeOverride",
         "title": "Remove Override",
         "category": "Oh My OpenAgent"
@@ -103,12 +90,6 @@
         "category": "Oh My OpenAgent"
       },
       {
-        "command": "ohMyOpenAgent.switchMainModel",
-        "title": "Switch as Main",
-        "category": "Oh My OpenAgent",
-        "icon": "$(arrow-up)"
-      },
-      {
         "command": "ohMyOpenAgent.saveActiveProfile",
         "title": "Save Active Profile",
         "category": "Oh My OpenAgent",
@@ -126,16 +107,6 @@
           "command": "ohMyOpenAgent.editCategory",
           "when": "view == ohMyOpenAgent.models && (viewItem == category || viewItem == categoryOverride)",
           "group": "inline"
-        },
-        {
-          "command": "ohMyOpenAgent.addAgentOverride",
-          "when": "view == ohMyOpenAgent.models && viewItem == agent",
-          "group": "override"
-        },
-        {
-          "command": "ohMyOpenAgent.addCategoryOverride",
-          "when": "view == ohMyOpenAgent.models && viewItem == category",
-          "group": "override"
         },
         {
           "command": "ohMyOpenAgent.removeOverride",
@@ -163,14 +134,43 @@
           "group": "profile"
         },
         {
-          "command": "ohMyOpenAgent.switchMainModel",
-          "when": "view == ohMyOpenAgent.models && viewItem == fallbackModel",
-          "group": "inline"
-        },
-        {
           "command": "ohMyOpenAgent.saveActiveProfile",
           "when": "view == ohMyOpenAgent.models && viewItem == activeProfileModified",
           "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "ohMyOpenAgent.editAgent",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.editCategory",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.removeOverride",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.activateProfile",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.renameProfile",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.duplicateProfile",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.deleteProfile",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.saveActiveProfile",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -199,14 +199,14 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "@types/vscode": "^1.85.0",
-    "esbuild": "^0.21.5",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.28.1",
     "esbuild-svelte": "^0.9.5",
     "happy-dom": "^20.10.4",
     "svelte": "^5.56.3",
     "svelte-preprocess": "^6.0.5",
     "typescript": "^5.4.5",
-    "vitest": "^1.6.0",
-    "vsce": "^2.15.0"
+    "vitest": "4.1.10"
   }
 }

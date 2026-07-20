@@ -1,4 +1,4 @@
-// Command handlers for the 12 Oh My OpenAgent VS Code commands declared in
+// Command handlers for the 11 Oh My OpenAgent VS Code commands declared in
 // `package.json`. All wiring lives here so `extension.ts` stays a thin
 // activation shim: it instantiates the stores + tree provider, calls
 // `registerCommands(...)`, and pushes the returned `Disposable` into
@@ -29,14 +29,13 @@ import type {
   AgentModelTreeProvider,
 } from './ui/agentModelTreeProvider.js';
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
-import type { FallbackModelConfig } from './config/schema.js';
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Register all 12 commands declared in `package.json` and return a single
+ * Register all 11 commands declared in `package.json` and return a single
  * `Disposable` that unregisters them all. The activation code pushes the
  * returned value into `context.subscriptions`.
  */
@@ -111,59 +110,7 @@ export function registerCommands(
       treeProvider.refresh();
     }),
 
-    // 5. Create an empty override entry for a built-in agent.
-    vscode.commands.registerCommand(
-      'ohMyOpenAgent.addAgentOverride',
-      async (item: AgentModelTreeItem | undefined) => {
-        if (!isAgentLikeItem(item)) {
-          void vscode.window.showWarningMessage(
-            'Select an agent in the Models view first.',
-          );
-          return;
-        }
-        const name = item.nodeName;
-        try {
-          await configStore.updateConfig((draft) => {
-            if (!draft.agents) {
-              draft.agents = {};
-            }
-            if (draft.agents[name] === undefined) {
-              draft.agents[name] = {};
-            }
-          });
-        } catch (err) {
-          reportError('Failed to add agent override', err);
-        }
-      },
-    ),
-
-    // 6. Create an empty override entry for a built-in category.
-    vscode.commands.registerCommand(
-      'ohMyOpenAgent.addCategoryOverride',
-      async (item: AgentModelTreeItem | undefined) => {
-        if (!isCategoryLikeItem(item)) {
-          void vscode.window.showWarningMessage(
-            'Select a category in the Models view first.',
-          );
-          return;
-        }
-        const name = item.nodeName;
-        try {
-          await configStore.updateConfig((draft) => {
-            if (!draft.categories) {
-              draft.categories = {};
-            }
-            if (draft.categories[name] === undefined) {
-              draft.categories[name] = {};
-            }
-          });
-        } catch (err) {
-          reportError('Failed to add category override', err);
-        }
-      },
-    ),
-
-    // 7. Delete the override key for an agent or category.
+    // 5. Delete the override key for an agent or category.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.removeOverride',
       async (item: AgentModelTreeItem | undefined) => {
@@ -189,7 +136,7 @@ export function registerCommands(
       },
     ),
 
-    // 8. Create a new profile by snapshotting the current config.
+    // 6. Create a new profile by snapshotting the current config.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.createProfile',
       async () => {
@@ -224,7 +171,7 @@ export function registerCommands(
       },
     ),
 
-    // 9. Activate a saved profile.
+    // 7. Activate a saved profile.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.activateProfile',
       async (item: AgentModelTreeItem | undefined) => {
@@ -242,7 +189,7 @@ export function registerCommands(
       },
     ),
 
-    // 10. Rename a saved profile.
+    // 8. Rename a saved profile.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.renameProfile',
       async (item: AgentModelTreeItem | undefined) => {
@@ -276,7 +223,7 @@ export function registerCommands(
       },
     ),
 
-    // 11. Duplicate a saved profile under a new name.
+    // 9. Duplicate a saved profile under a new name.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.duplicateProfile',
       async (item: AgentModelTreeItem | undefined) => {
@@ -307,7 +254,7 @@ export function registerCommands(
       },
     ),
 
-    // 12. Delete a saved profile (with a modal confirmation).
+    // 10. Delete a saved profile (with a modal confirmation).
     vscode.commands.registerCommand(
       'ohMyOpenAgent.deleteProfile',
       async (item: AgentModelTreeItem | undefined) => {
@@ -334,75 +281,7 @@ export function registerCommands(
       },
     ),
 
-    // 13. Swap the agent's / category's main model with the selected fallback.
-    vscode.commands.registerCommand(
-      'ohMyOpenAgent.switchMainModel',
-      async (item: AgentModelTreeItem | undefined) => {
-        if (!isFallbackItem(item)) {
-          void vscode.window.showWarningMessage(
-            'Select a fallback model entry in the Models view first.',
-          );
-          return;
-        }
-        const group = item.group;
-        const agentName = item.nodeName;
-        const fallbackIndex = item.fallbackIndex;
-        if (fallbackIndex === undefined || fallbackIndex < 0) {
-          void vscode.window.showWarningMessage(
-            'Could not identify the fallback model entry.',
-          );
-          return;
-        }
-
-        try {
-          await configStore.updateConfig((draft) => {
-            const config =
-              group === 'agents'
-                ? draft.agents?.[agentName]
-                : draft.categories?.[agentName];
-            if (!config) {
-              throw new Error(
-                `No override found for ${group === 'agents' ? 'agent' : 'category'} "${agentName}".\nAdd an override first, then try again.`,
-              );
-            }
-            const rawFallbacks = config.fallback_models;
-            if (!Array.isArray(rawFallbacks) || rawFallbacks.length <= fallbackIndex) {
-              throw new Error(
-                `Fallback entry at index ${fallbackIndex} not found for "${agentName}".`,
-              );
-            }
-
-            const entry = rawFallbacks[fallbackIndex];
-            const fallbackModel =
-              typeof entry === 'string' ? entry : entry.model;
-            const fallbackVariant =
-              typeof entry === 'string' ? undefined : entry.variant;
-
-            const currentModel = config.model;
-            const currentVariant = config.variant;
-
-            config.model = fallbackModel;
-            if (fallbackVariant !== undefined) {
-              config.variant = fallbackVariant;
-            } else if (currentVariant !== undefined) {
-              // Clear the main variant when switching to a fallback that has none
-              delete config.variant;
-            }
-
-            const replacement: string | FallbackModelConfig = currentModel
-              ? currentVariant !== undefined
-                ? { model: currentModel, variant: currentVariant }
-                : currentModel
-              : fallbackModel;
-            rawFallbacks[fallbackIndex] = replacement;
-          });
-        } catch (err) {
-          reportError('Failed to switch main model', err);
-        }
-      },
-    ),
-
-    // 14. Snapshot the live config back into the active profile.
+    // 11. Snapshot the live config back into the active profile.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.saveActiveProfile',
       async () => {
@@ -477,21 +356,6 @@ function isOverrideItem(
     (item.group === 'agents' || item.group === 'categories') &&
     typeof item.nodeName === 'string' &&
     item.nodeName.length > 0
-  );
-}
-
-/** A fallback model entry under an agent or category override. */
-function isFallbackItem(
-  item: AgentModelTreeItem | undefined,
-): item is AgentModelTreeItem & { nodeName: string; fallbackIndex: number } {
-  return (
-    item !== undefined &&
-    item.kind === 'fallback' &&
-    (item.group === 'agents' || item.group === 'categories') &&
-    typeof item.nodeName === 'string' &&
-    item.nodeName.length > 0 &&
-    typeof item.fallbackIndex === 'number' &&
-    item.fallbackIndex >= 0
   );
 }
 

@@ -330,6 +330,9 @@ code {
 }
 
 .fallback-card__remove {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   background: transparent;
   border: 1px solid transparent;
   color: var(--vscode-descriptionForeground);

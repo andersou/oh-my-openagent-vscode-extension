@@ -424,7 +424,7 @@ describe('webview lazy model picker (end-to-end)', () => {
     ]);
   });
 
-  it('does not post modelChanged when switching a fallback to main', async () => {
+  it('promotes a rich fallback to main through drag and preserves ordered rich fallbacks on save', async () => {
     const { window, messages } = env;
     window.postMessage({
       command: 'init',
@@ -432,21 +432,270 @@ describe('webview lazy model picker (end-to-end)', () => {
       name: 'sisyphus',
       config: {
         model: 'main/model',
-        fallback_models: ['fallback/model'],
+        variant: 'main-variant',
+        reasoningEffort: 'high',
+        temperature: 0.7,
+        top_p: 0.8,
+        maxTokens: 8192,
+        thinking: { type: 'enabled', budgetTokens: 2048 },
+        fallback_models: [
+          {
+            model: 'promoted/model',
+            variant: 'promoted-variant',
+            reasoningEffort: 'low',
+            temperature: 0.25,
+            top_p: 0.3,
+            maxTokens: 4096,
+            thinking: { type: 'enabled', budgetTokens: 512 },
+          },
+          'legacy/fallback',
+          {
+            model: 'last/model',
+            variant: 'last-variant',
+            reasoningEffort: 'medium',
+            temperature: 1,
+            top_p: 0.9,
+            maxTokens: 1024,
+          },
+        ],
       },
     });
     await window.happyDOM.waitUntilComplete();
 
-    const switchBtn = window.document.querySelector('.fallback-card__switch') as HTMLButtonElement;
-    switchBtn.click();
-    await window.happyDOM.waitUntilComplete();
-    await new Promise((r) => setTimeout(r, 300));
-
-    const modelChangedMessages = messages.filter(
-      (m): m is { command: string; modelId: string } =>
-        typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'modelChanged',
+    const fallbackHandle = window.document.querySelector<HTMLButtonElement>(
+      '.fallback-card .fallback-card__handle',
     );
-    expect(modelChangedMessages).toHaveLength(0);
+    fallbackHandle?.dispatchEvent(new window.Event('dragstart', { bubbles: true }));
+
+    const mainModel = window.document.querySelector<HTMLElement>(
+      '[data-section="model"]',
+    );
+    mainModel?.dispatchEvent(
+      new window.Event('drop', { bubbles: true, cancelable: true }),
+    );
+    await window.happyDOM.waitUntilComplete();
+
+    const saveBtn = window.document.getElementById('btn-save') as HTMLButtonElement;
+    saveBtn.click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveMessage = messages.find(
+      (message): message is { command: 'save'; payload: unknown } =>
+        typeof message === 'object' &&
+        message !== null &&
+        'command' in message &&
+        message.command === 'save' &&
+        'payload' in message,
+    );
+    expect(saveMessage).toEqual({
+      command: 'save',
+      payload: {
+        model: 'promoted/model',
+        variant: 'promoted-variant',
+        reasoningEffort: 'low',
+        temperature: 0.25,
+        top_p: 0.3,
+        maxTokens: 4096,
+        thinking: { type: 'enabled', budgetTokens: 512 },
+        fallback_models: [
+          {
+            model: 'main/model',
+            variant: 'main-variant',
+            reasoningEffort: 'high',
+            temperature: 0.7,
+            top_p: 0.8,
+            maxTokens: 8192,
+            thinking: { type: 'enabled', budgetTokens: 2048 },
+          },
+          { model: 'legacy/fallback' },
+          {
+            model: 'last/model',
+            variant: 'last-variant',
+            reasoningEffort: 'medium',
+            temperature: 1,
+            top_p: 0.9,
+            maxTokens: 1024,
+          },
+        ],
+      },
+    });
+  });
+
+  it('promotes a rich fallback to main with keyboard drag and announces each state', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: {
+        model: 'main/model',
+        variant: 'main-variant',
+        reasoningEffort: 'high',
+        temperature: 0.7,
+        top_p: 0.8,
+        maxTokens: 8192,
+        thinking: { type: 'enabled', budgetTokens: 2048 },
+        fallback_models: [
+          {
+            model: 'promoted/model',
+            variant: 'promoted-variant',
+            reasoningEffort: 'low',
+            temperature: 0.25,
+            top_p: 0.3,
+            maxTokens: 4096,
+            thinking: { type: 'enabled', budgetTokens: 512 },
+          },
+          'legacy/fallback',
+        ],
+      },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const fallbackHandle = window.document.querySelector<HTMLButtonElement>(
+      '.fallback-card .fallback-card__handle',
+    );
+    expect(fallbackHandle).not.toBeNull();
+    if (!fallbackHandle) throw new Error('Fallback handle did not render');
+    fallbackHandle.focus();
+    expect(window.document.activeElement).toBe(fallbackHandle);
+
+    fallbackHandle.dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }),
+    );
+    await window.happyDOM.waitUntilComplete();
+
+    const dragStatus = window.document.getElementById('model-drag-status');
+    expect(dragStatus?.textContent).toContain('Fallback 1 picked up');
+    expect(fallbackHandle.getAttribute('aria-grabbed')).toBe('true');
+
+    fallbackHandle.dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }),
+    );
+    await window.happyDOM.waitUntilComplete();
+
+    expect(dragStatus?.textContent).toBe('Moved to Main model.');
+    const mainHandle = window.document.querySelector<HTMLButtonElement>(
+      '[data-section="model"] .fallback-card__handle',
+    );
+    expect(mainHandle).not.toBeNull();
+    if (!mainHandle) throw new Error('Main handle did not render');
+    expect(mainHandle.getAttribute('aria-grabbed')).toBe('true');
+    expect(window.document.activeElement).toBe(mainHandle);
+
+    const focusedHandle = window.document.activeElement;
+    if (!(focusedHandle instanceof window.HTMLButtonElement)) {
+      throw new Error('Promoted handle did not retain focus');
+    }
+    focusedHandle.dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    );
+    await window.happyDOM.waitUntilComplete();
+
+    expect(dragStatus?.textContent).toBe('Dropped at Main model.');
+    expect(mainHandle.getAttribute('aria-grabbed')).toBe('false');
+
+    const saveBtn = window.document.getElementById('btn-save') as HTMLButtonElement;
+    saveBtn.click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveMessage = messages.find(
+      (message): message is { command: 'save'; payload: unknown } =>
+        typeof message === 'object' &&
+        message !== null &&
+        'command' in message &&
+        message.command === 'save' &&
+        'payload' in message,
+    );
+    expect(saveMessage).toEqual({
+      command: 'save',
+      payload: {
+        model: 'promoted/model',
+        variant: 'promoted-variant',
+        reasoningEffort: 'low',
+        temperature: 0.25,
+        top_p: 0.3,
+        maxTokens: 4096,
+        thinking: { type: 'enabled', budgetTokens: 512 },
+        fallback_models: [
+          {
+            model: 'main/model',
+            variant: 'main-variant',
+            reasoningEffort: 'high',
+            temperature: 0.7,
+            top_p: 0.8,
+            maxTokens: 8192,
+            thinking: { type: 'enabled', budgetTokens: 2048 },
+          },
+          { model: 'legacy/fallback' },
+        ],
+      },
+    });
+  });
+
+  it('cancels keyboard drag and restores the original model order', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model', fallback_models: ['fallback/model'] },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const fallbackHandle = window.document.querySelector<HTMLButtonElement>(
+      '.fallback-card .fallback-card__handle',
+    );
+    expect(fallbackHandle).not.toBeNull();
+    if (!fallbackHandle) throw new Error('Fallback handle did not render');
+    fallbackHandle.focus();
+
+    fallbackHandle.dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }),
+    );
+    fallbackHandle.dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }),
+    );
+    await window.happyDOM.waitUntilComplete();
+
+    const mainHandle = window.document.querySelector<HTMLButtonElement>(
+      '[data-section="model"] .fallback-card__handle',
+    );
+    expect(mainHandle).not.toBeNull();
+    if (!mainHandle) throw new Error('Main handle did not render');
+    expect(window.document.activeElement).toBe(mainHandle);
+    mainHandle.dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await window.happyDOM.waitUntilComplete();
+
+    const mainModelInput = window.document.getElementById('f-model') as HTMLInputElement;
+    expect(mainModelInput.value).toBe('main/model');
+    expect(window.document.getElementById('model-drag-status')?.textContent).toBe(
+      'Move canceled. Restored to Fallback 1.',
+    );
+    const restoredHandle = window.document.querySelector<HTMLButtonElement>(
+      '.fallback-card .fallback-card__handle',
+    );
+    expect(restoredHandle).not.toBeNull();
+    expect(window.document.activeElement).toBe(restoredHandle);
+    expect(restoredHandle?.getAttribute('aria-grabbed')).toBe('false');
+  });
+
+  it('uses drag as the only model-order control', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model', fallback_models: ['fallback/model'] },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.querySelector('.fallback-card__switch')).toBeNull();
+    expect(window.document.querySelector('.fallback-card__move')).toBeNull();
+    expect(
+      window.document.querySelector('[data-section="model"] h2')?.textContent,
+    ).toBe('Main model');
   });
 
   it('does not post modelChanged messages while typing', async () => {

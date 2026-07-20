@@ -8,20 +8,12 @@
 </script>
 
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { moveItem } from './reorder.js';
 
   let entityKind = $state(null);
   let entityName = $state(null);
-  let model = $state('');
-  let variant = $state('');
-  let reasoning = $state('');
-  let temperature = $state('');
-  let topP = $state('');
-  let maxTokens = $state('');
-  let thinkingEnabled = $state(false);
-  let budgetTokens = $state('');
-  let fallbackModels = $state([]);
+  let modelCards = $state([createModelCard()]);
   let initialThinkingType = $state(null);
   let initialized = $state(false);
   let formDirty = $state(false);
@@ -35,12 +27,15 @@
   let availableReasoning = $state([]);
   let dragIndex = $state(null);
   let dragOverIndex = $state(null);
+  let keyboardDragStartIndex = $state(null);
+  let dragAnnouncement = $state('');
 
   const FALLBACK_VARIANTS = ['max', 'xhigh', 'high', 'medium', 'low'];
   const FALLBACK_REASONING = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
-  let capabilities = $derived(modelMetadata[model]?.capabilities ?? null);
-  let variants = $derived(modelMetadata[model]?.variants ?? null);
+  let mainModel = $derived(modelCards[0]);
+  let capabilities = $derived(modelMetadata[mainModel?.model]?.capabilities ?? null);
+  let variants = $derived(modelMetadata[mainModel?.model]?.variants ?? null);
   let temperatureSupported = $derived(capabilities ? capabilities.temperature !== false : true);
   let reasoningSupported = $derived(capabilities ? capabilities.reasoning !== false : true);
 
@@ -119,6 +114,23 @@
     return Number.isInteger(n) ? n : undefined;
   }
 
+  function createModelCard(entry = {}) {
+    const thinking = entry.thinking && entry.thinking.type === 'enabled'
+      ? entry.thinking
+      : null;
+    return {
+      model: entry.model != null ? String(entry.model) : '',
+      variant: entry.variant != null ? String(entry.variant) : '',
+      reasoningEffort: entry.reasoningEffort != null ? String(entry.reasoningEffort) : '',
+      temperature: entry.temperature !== undefined && entry.temperature !== null && entry.temperature !== '' ? String(entry.temperature) : '',
+      top_p: entry.top_p !== undefined && entry.top_p !== null && entry.top_p !== '' ? String(entry.top_p) : '',
+      maxTokens: entry.maxTokens !== undefined && entry.maxTokens !== null && entry.maxTokens !== '' ? String(entry.maxTokens) : '',
+      thinkingEnabled: thinking !== null,
+      budgetTokens: thinking?.budgetTokens !== undefined && thinking?.budgetTokens !== null && thinking?.budgetTokens !== '' ? String(thinking.budgetTokens) : '',
+      __uid: nextFallbackUid(),
+    };
+  }
+
   function validateNumber(name, raw) {
     if (raw === '' || raw == null) return null;
     const n = Number(raw);
@@ -133,68 +145,62 @@
 
   function validateAll() {
     return {
-      temperature: validateNumber('temperature', temperature),
-      top_p: validateNumber('top_p', topP),
-      maxTokens: validateNumber('maxTokens', maxTokens),
-      budgetTokens: thinkingEnabled ? validateNumber('budgetTokens', budgetTokens) : null,
+      temperature: validateNumber('temperature', mainModel.temperature),
+      top_p: validateNumber('top_p', mainModel.top_p),
+      maxTokens: validateNumber('maxTokens', mainModel.maxTokens),
+      budgetTokens: mainModel.thinkingEnabled ? validateNumber('budgetTokens', mainModel.budgetTokens) : null,
     };
   }
 
   function readFormPayload() {
     const out = {};
-    if (asString(model) !== undefined) out.model = asString(model);
+    if (asString(mainModel.model) !== undefined) out.model = asString(mainModel.model);
     // Explicit null clears the key from the JSON override (vs omitting
     // it, which preserves whatever was already there).
-    out.variant = asString(variant) ?? null;
-    out.reasoningEffort = asString(reasoning) ?? null;
-    out.temperature = asNumber(temperature) ?? null;
-    out.top_p = asNumber(topP) ?? null;
-    out.maxTokens = asInt(maxTokens) ?? null;
-    if (thinkingEnabled) {
+    out.variant = asString(mainModel.variant) ?? null;
+    out.reasoningEffort = asString(mainModel.reasoningEffort) ?? null;
+    out.temperature = asNumber(mainModel.temperature) ?? null;
+    out.top_p = asNumber(mainModel.top_p) ?? null;
+    out.maxTokens = asInt(mainModel.maxTokens) ?? null;
+    if (mainModel.thinkingEnabled) {
       const thinking = { type: 'enabled' };
-      const b = asInt(budgetTokens);
+      const b = asInt(mainModel.budgetTokens);
       if (b !== undefined) thinking.budgetTokens = b;
       out.thinking = thinking;
     } else if (initialThinkingType === 'enabled') {
       out.thinking = { type: 'disabled' };
     }
-    const fallbacks = readFallbackCards();
-    if (fallbacks !== undefined) out.fallback_models = fallbacks;
+    if (modelCards.length > 1) out.fallback_models = modelCards.slice(1).map(readModelCard);
     return out;
   }
 
-  function readFallbackCards() {
-    if (fallbackModels.length === 0) return undefined;
-    return fallbackModels.map((entry) => {
-      const e = { model: entry.model };
-      if (entry.variant) e.variant = entry.variant;
-      if (entry.reasoningEffort) e.reasoningEffort = entry.reasoningEffort;
-      if (entry.temperature !== undefined && entry.temperature !== null && entry.temperature !== '') {
-        e.temperature = Number(entry.temperature);
-      }
-      if (entry.top_p !== undefined && entry.top_p !== null && entry.top_p !== '') {
-        e.top_p = Number(entry.top_p);
-      }
-      if (entry.maxTokens !== undefined && entry.maxTokens !== null && entry.maxTokens !== '') {
-        e.maxTokens = Number(entry.maxTokens);
-      }
-      if (entry.thinking) {
-        const t = { type: 'enabled' };
-        if (entry.thinking.budgetTokens !== undefined && entry.thinking.budgetTokens !== null && entry.thinking.budgetTokens !== '') {
-          t.budgetTokens = Number(entry.thinking.budgetTokens);
-        }
-        e.thinking = t;
-      }
-      return e;
-    });
+  function readModelCard(entry) {
+    const out = { model: entry.model };
+    if (entry.variant) out.variant = entry.variant;
+    if (entry.reasoningEffort) out.reasoningEffort = entry.reasoningEffort;
+    if (entry.temperature !== '') out.temperature = Number(entry.temperature);
+    if (entry.top_p !== '') out.top_p = Number(entry.top_p);
+    if (entry.maxTokens !== '') out.maxTokens = Number(entry.maxTokens);
+    if (entry.thinkingEnabled) {
+      const thinking = { type: 'enabled' };
+      if (entry.budgetTokens !== '') thinking.budgetTokens = Number(entry.budgetTokens);
+      out.thinking = thinking;
+    }
+    return out;
   }
 
   function serializeValues() {
     return {
-      model, variant, reasoningEffort: reasoning,
-      temperature: asNumber(temperature), top_p: asNumber(topP), maxTokens: asInt(maxTokens),
-      thinking: thinkingEnabled ? { type: 'enabled', budgetTokens: asInt(budgetTokens) } : { type: 'disabled' },
-      fallback_models: readFallbackCards() || [],
+      model: mainModel.model,
+      variant: mainModel.variant,
+      reasoningEffort: mainModel.reasoningEffort,
+      temperature: asNumber(mainModel.temperature),
+      top_p: asNumber(mainModel.top_p),
+      maxTokens: asInt(mainModel.maxTokens),
+      thinking: mainModel.thinkingEnabled
+        ? { type: 'enabled', budgetTokens: asInt(mainModel.budgetTokens) }
+        : { type: 'disabled' },
+      fallback_models: modelCards.slice(1).map(readModelCard),
     };
   }
 
@@ -202,25 +208,18 @@
     entityKind = data?.type ?? null;
     entityName = data?.name ?? null;
     const cfg = data?.config ?? {};
-    model = cfg.model != null ? String(cfg.model) : '';
-    variant = cfg.variant != null ? String(cfg.variant) : '';
-    reasoning = cfg.reasoningEffort != null ? String(cfg.reasoningEffort) : '';
-    temperature = typeof cfg.temperature === 'number' ? String(cfg.temperature) : '';
-    topP = typeof cfg.top_p === 'number' ? String(cfg.top_p) : '';
-    maxTokens = typeof cfg.maxTokens === 'number' ? String(cfg.maxTokens) : '';
-    thinkingEnabled = !!(cfg.thinking && cfg.thinking.type === 'enabled');
-    budgetTokens = thinkingEnabled && typeof cfg.thinking.budgetTokens === 'number' ? String(cfg.thinking.budgetTokens) : '';
     initialThinkingType = cfg.thinking?.type === 'enabled' || cfg.thinking?.type === 'disabled' ? cfg.thinking.type : null;
-    if (Array.isArray(cfg.fallback_models)) {
-      fallbackModels = cfg.fallback_models.map((entry) => {
-        if (typeof entry === 'string') return { model: entry, __uid: nextFallbackUid() };
-        return { ...entry, model: entry.model ?? '', __uid: nextFallbackUid() };
-      });
-    } else if (typeof cfg.fallback_models === 'string' && cfg.fallback_models.length > 0) {
-      fallbackModels = [{ model: cfg.fallback_models, __uid: nextFallbackUid() }];
-    } else {
-      fallbackModels = [];
-    }
+    const fallbackEntries = Array.isArray(cfg.fallback_models)
+      ? cfg.fallback_models
+      : typeof cfg.fallback_models === 'string' && cfg.fallback_models.length > 0
+        ? [cfg.fallback_models]
+        : [];
+    modelCards = [
+      createModelCard(cfg),
+      ...fallbackEntries.map((entry) => createModelCard(
+        typeof entry === 'string' ? { model: entry } : entry,
+      )),
+    ];
     formDirty = false;
     initialized = true;
     setStatus(null);
@@ -229,7 +228,7 @@
   }
 
   function onModelInput() {
-    updateDynamicFieldsForModel(model);
+    updateDynamicFieldsForModel(mainModel.model);
     formDirty = true;
     persist();
   }
@@ -287,80 +286,114 @@
   }
 
   function onAddFallback() {
-    fallbackModels = [...fallbackModels, { model: '', __uid: nextFallbackUid() }];
+    modelCards = [...modelCards, createModelCard()];
     formDirty = true;
     persist();
   }
 
-  function canMoveFallback(from, to) {
-    const length = fallbackModels.length;
+  function canMoveModel(from, to) {
+    const length = modelCards.length;
     return Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to >= 0 && from < length && to < length && from !== to;
   }
 
-  function moveFallback(from, to) {
-    if (!canMoveFallback(from, to)) return;
-    fallbackModels = moveItem(fallbackModels, from, to);
+  function moveModel(from, to) {
+    if (!canMoveModel(from, to)) return false;
+    modelCards = moveItem(modelCards, from, to);
+    updateDynamicFieldsForModel(mainModel.model);
     formDirty = true;
     persist();
+    return true;
   }
 
   function clearDragState() {
     dragIndex = null;
     dragOverIndex = null;
+    keyboardDragStartIndex = null;
   }
 
-  function onFallbackDragStart(event, index) {
+  function onModelDragStart(event, index) {
+    keyboardDragStartIndex = null;
     dragIndex = index;
     dragOverIndex = index;
     event.dataTransfer?.setData('text/plain', String(index));
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
   }
 
-  function onFallbackDragOver(event, index) {
+  function onModelDragOver(event, index) {
     event.preventDefault();
     dragOverIndex = index;
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
   }
 
-  function onFallbackDrop(event, index) {
+  function onModelDrop(event, index) {
     event.preventDefault();
-    moveFallback(dragIndex, index);
+    moveModel(dragIndex, index);
     clearDragState();
   }
 
-  function onRemoveFallback(index) {
-    fallbackModels = fallbackModels.filter((_, i) => i !== index);
-    formDirty = true;
-    persist();
+  function modelPosition(index) {
+    return index === 0 ? 'Main model' : `Fallback ${index}`;
   }
 
-  function onSwitchMain(index) {
-    const entry = fallbackModels[index];
-    if (!entry || !entry.model) return;
+  function focusModelHandle(uid) {
+    tick().then(() => {
+      document.querySelector(`[data-model-card-uid="${uid}"]`)?.focus();
+    });
+  }
 
-    const currentModel = model;
-    const currentVariant = variant;
+  function onModelKeydown(event, index) {
+    const isPickupKey = event.key === ' ' || event.key === 'Enter';
+    if (keyboardDragStartIndex === null) {
+      if (!isPickupKey) return;
+      event.preventDefault();
+      dragIndex = index;
+      dragOverIndex = index;
+      keyboardDragStartIndex = index;
+      dragAnnouncement = `${modelPosition(index)} picked up. Use Arrow Up or Arrow Down to move, Space or Enter to drop, Escape to cancel.`;
+      return;
+    }
 
-    // Promote fallback to main
-    model = entry.model;
-    variant = entry.variant || '';
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      const restoreIndex = keyboardDragStartIndex;
+      if (dragIndex !== restoreIndex) moveModel(dragIndex, restoreIndex);
+      dragAnnouncement = `Move canceled. Restored to ${modelPosition(restoreIndex)}.`;
+      clearDragState();
+      focusModelHandle(modelCards[restoreIndex].__uid);
+      return;
+    }
 
-    // Demote current main to the fallback slot
-    fallbackModels[index] = {
-      ...entry,
-      model: currentModel || fallbackModels[index].model,
-      variant: currentVariant || '',
-    };
+    if (isPickupKey) {
+      event.preventDefault();
+      dragAnnouncement = `Dropped at ${modelPosition(dragIndex)}.`;
+      clearDragState();
+      return;
+    }
 
-    // Recompute capabilities / variant / reasoning options for the new model
-    updateDynamicFieldsForModel(model);
+    const targetIndex = event.key === 'ArrowUp'
+      ? dragIndex - 1
+      : event.key === 'ArrowDown'
+        ? dragIndex + 1
+        : dragIndex;
+    if (targetIndex === dragIndex) return;
+    event.preventDefault();
+    if (moveModel(dragIndex, targetIndex)) {
+      dragIndex = targetIndex;
+      dragOverIndex = targetIndex;
+      dragAnnouncement = `Moved to ${modelPosition(targetIndex)}.`;
+      focusModelHandle(modelCards[targetIndex].__uid);
+    }
+  }
 
+  function onRemoveFallback(index) {
+    if (index <= 0 || index >= modelCards.length) return;
+    modelCards = modelCards.filter((_, i) => i !== index);
     formDirty = true;
     persist();
   }
 
   function onThinkingToggle() {
-    if (!thinkingEnabled) budgetTokens = '';
+    if (!mainModel.thinkingEnabled) mainModel.budgetTokens = '';
     formDirty = true;
     persist();
   }
@@ -393,7 +426,7 @@
       for (const m of models) {
         modelMetadata = { ...modelMetadata, [m.modelId]: m };
       }
-      updateDynamicFieldsForModel(model);
+      updateDynamicFieldsForModel(mainModel.model);
       if (ids.length > 0) {
         setModelStatus(`${ids.length} model${ids.length === 1 ? '' : 's'} available \u2014 type to filter.`, 'loaded');
       } else {
@@ -426,10 +459,42 @@
     <p class="editor__subtitle" id="subtitle">{entityName ?? ''}</p>
   </header>
 
+  <p class="sr-only" id="model-drag-instructions">Press Space or Enter to pick up a model, Arrow Up or Arrow Down to reorder it, Space or Enter to drop it, or Escape to cancel.</p>
+  <div class="sr-only" id="model-drag-status" role="status" aria-live="polite">{dragAnnouncement}</div>
+
   <form id="editor-form" class="editor__form" onsubmit={(e) => { e.preventDefault(); onSave(); }} novalidate autocomplete="off">
-    <section class="editor__section" data-section="model">
+    <section
+      class="editor__section"
+      class:dragging={dragIndex === 0}
+      class:drag-over={dragOverIndex === 0 && dragIndex !== null && dragIndex !== 0}
+      data-section="model"
+      aria-labelledby="main-model-heading"
+      ondragover={(e) => onModelDragOver(e, 0)}
+      ondrop={(e) => onModelDrop(e, 0)}
+      ondragend={clearDragState}
+    >
       <header class="editor__section-header">
-        <h2 class="editor__section-title">Model</h2>
+        <div class="fallback-card__heading">
+          <button
+            type="button"
+            class="fallback-card__handle"
+            draggable="true"
+            title="Drag Main model to reorder"
+            aria-label="Drag Main model to reorder"
+            aria-describedby="model-drag-instructions"
+            aria-grabbed={keyboardDragStartIndex !== null && dragIndex === 0}
+            aria-keyshortcuts="Space Enter ArrowUp ArrowDown Escape"
+            data-model-card-uid={mainModel.__uid}
+            ondragstart={(e) => onModelDragStart(e, 0)}
+            ondragend={clearDragState}
+            onkeydown={(e) => onModelKeydown(e, 0)}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+              <path d="M3 2h1.5v1.5H3V2Zm4.5 0H9v1.5H7.5V2ZM3 5.25h1.5v1.5H3v-1.5Zm4.5 0H9v1.5H7.5v-1.5ZM3 8.5h1.5V10H3V8.5Zm4.5 0H9V10H7.5V8.5Z" />
+            </svg>
+          </button>
+          <h2 class="editor__section-title" id="main-model-heading">Main model</h2>
+        </div>
         <p class="editor__section-desc">Override the default model and tuning tier.</p>
       </header>
 
@@ -446,7 +511,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocorrect="off"
-            bind:value={model}
+            bind:value={mainModel.model}
             oninput={onModelInput}
             onchange={onModelInput}
           />
@@ -482,7 +547,7 @@
       <div class="field-grid">
         <div class="field">
           <label class="field__label" for="f-variant">Variant</label>
-          <select class="field__input" id="f-variant" name="variant" bind:value={variant} onchange={onFieldChange} disabled={!model}>
+          <select class="field__input" id="f-variant" name="variant" bind:value={mainModel.variant} onchange={onFieldChange} disabled={!mainModel.model}>
             {#each availableVariants as v}
               <option value={v}>{v === '' ? '(default)' : v}</option>
             {/each}
@@ -491,7 +556,7 @@
 
         <div class="field">
           <label class="field__label" for="f-reasoning">Reasoning effort</label>
-          <select class="field__input" id="f-reasoning" name="reasoningEffort" bind:value={reasoning} onchange={onFieldChange} disabled={!reasoningSupported}>
+          <select class="field__input" id="f-reasoning" name="reasoningEffort" bind:value={mainModel.reasoningEffort} onchange={onFieldChange} disabled={!reasoningSupported}>
             {#each availableReasoning as r}
               <option value={r}>{r === '' ? '(default)' : r}</option>
             {/each}
@@ -513,15 +578,15 @@
         <div class="field-grid field-grid--three">
         <div class="field">
           <label class="field__label" for="f-temperature">Temperature</label>
-          <input class="field__input" type="number" id="f-temperature" name="temperature" step="0.1" min="0" max="2" inputmode="decimal" placeholder="0.0 – 2.0" bind:value={temperature} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support temperature.'} />
+          <input class="field__input" type="number" id="f-temperature" name="temperature" step="0.1" min="0" max="2" inputmode="decimal" placeholder="0.0 – 2.0" bind:value={mainModel.temperature} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support temperature.'} />
         </div>
         <div class="field">
           <label class="field__label" for="f-top-p">Top-p</label>
-          <input class="field__input" type="number" id="f-top-p" name="top_p" step="0.05" min="0" max="1" inputmode="decimal" placeholder="0.0 – 1.0" bind:value={topP} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support sampling parameters.'} />
+          <input class="field__input" type="number" id="f-top-p" name="top_p" step="0.05" min="0" max="1" inputmode="decimal" placeholder="0.0 – 1.0" bind:value={mainModel.top_p} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support sampling parameters.'} />
         </div>
         <div class="field">
           <label class="field__label" for="f-max-tokens">Max tokens</label>
-          <input class="field__input" type="number" id="f-max-tokens" name="maxTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 4096" bind:value={maxTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support max tokens.'} />
+          <input class="field__input" type="number" id="f-max-tokens" name="maxTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 4096" bind:value={mainModel.maxTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!temperatureSupported} title={temperatureSupported ? '' : 'This model does not support max tokens.'} />
         </div>
         </div>
       </div>
@@ -538,13 +603,13 @@
 
       <div id="thinking-section-body" hidden={!thinkingOpen}>
         <div class="field field--checkbox">
-          <input class="field__checkbox" type="checkbox" id="f-thinking-enabled" name="thinkingEnabled" bind:checked={thinkingEnabled} onchange={onThinkingToggle} disabled={!reasoningSupported} />
+          <input class="field__checkbox" type="checkbox" id="f-thinking-enabled" name="thinkingEnabled" bind:checked={mainModel.thinkingEnabled} onchange={onThinkingToggle} disabled={!reasoningSupported} />
           <label class="field__label field__label--inline" for="f-thinking-enabled">Enable extended thinking</label>
         </div>
 
-        <div class="field field--nested" id="f-budget-field" hidden={!thinkingEnabled}>
+        <div class="field field--nested" id="f-budget-field" hidden={!mainModel.thinkingEnabled}>
           <label class="field__label" for="f-budget-tokens">Budget tokens</label>
-          <input class="field__input" type="number" id="f-budget-tokens" name="budgetTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 8192" bind:value={budgetTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!reasoningSupported} />
+          <input class="field__input" type="number" id="f-budget-tokens" name="budgetTokens" step="1" min="1" inputmode="numeric" placeholder="e.g. 8192" bind:value={mainModel.budgetTokens} oninput={onFieldChange} onchange={onFieldChange} disabled={!reasoningSupported} />
           <p class="field__hint">Token budget reserved for chain-of-thought reasoning.</p>
         </div>
       </div>
@@ -557,14 +622,14 @@
       </header>
 
       <div class="fallback-list" id="fallback-list" role="list">
-        {#each fallbackModels as entry, i (entry.__uid)}
+        {#each modelCards.slice(1) as entry, i (entry.__uid)}
           <div
             class="fallback-card"
-            class:dragging={dragIndex === i}
-            class:drag-over={dragOverIndex === i && dragIndex !== null && dragIndex !== i}
+            class:dragging={dragIndex === i + 1}
+            class:drag-over={dragOverIndex === i + 1 && dragIndex !== null && dragIndex !== i + 1}
             role="listitem"
-            ondragover={(e) => onFallbackDragOver(e, i)}
-            ondrop={(e) => onFallbackDrop(e, i)}
+            ondragover={(e) => onModelDragOver(e, i + 1)}
+            ondrop={(e) => onModelDrop(e, i + 1)}
             ondragend={clearDragState}
           >
             <div class="fallback-card__header">
@@ -573,10 +638,15 @@
                   type="button"
                   class="fallback-card__handle"
                   draggable="true"
-                  title="Drag fallback {i + 1} to reorder"
-                  aria-label="Drag fallback {i + 1} to reorder"
-                  ondragstart={(e) => onFallbackDragStart(e, i)}
+                  title="Drag Fallback {i + 1} to reorder"
+                  aria-label="Drag Fallback {i + 1} to reorder"
+                  aria-describedby="model-drag-instructions"
+                  aria-grabbed={keyboardDragStartIndex !== null && dragIndex === i + 1}
+                  aria-keyshortcuts="Space Enter ArrowUp ArrowDown Escape"
+                  data-model-card-uid={entry.__uid}
+                  ondragstart={(e) => onModelDragStart(e, i + 1)}
                   ondragend={clearDragState}
+                  onkeydown={(e) => onModelKeydown(e, i + 1)}
                 >
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
                     <path d="M3 2h1.5v1.5H3V2Zm4.5 0H9v1.5H7.5V2ZM3 5.25h1.5v1.5H3v-1.5Zm4.5 0H9v1.5H7.5v-1.5ZM3 8.5h1.5V10H3V8.5Zm4.5 0H9V10H7.5V8.5Z" />
@@ -585,10 +655,7 @@
                 <h3 class="fallback-card__title">Fallback {i + 1}</h3>
               </div>
               <div class="fallback-card__actions">
-                <button type="button" class="fallback-card__move" onclick={() => moveFallback(i, i - 1)} disabled={i === 0} title="Move fallback {i + 1} up" aria-label="Move fallback {i + 1} up">Move up</button>
-                <button type="button" class="fallback-card__move" onclick={() => moveFallback(i, i + 1)} disabled={i === fallbackModels.length - 1} title="Move fallback {i + 1} down" aria-label="Move fallback {i + 1} down">Move down</button>
-                <button type="button" class="fallback-card__switch" onclick={() => onSwitchMain(i)} disabled={!entry.model}>Switch as Main</button>
-                <button type="button" class="fallback-card__remove" onclick={() => onRemoveFallback(i)}>Remove</button>
+                <button type="button" class="fallback-card__remove" onclick={() => onRemoveFallback(i + 1)}>Remove</button>
               </div>
             </div>
             <div class="fallback-card__row">
@@ -631,12 +698,12 @@
             </div>
             <div class="fallback-card__row fallback-card__row--thinking">
               <div class="fallback-card__checkbox">
-                <input type="checkbox" id="fb-thinking-{entry.__uid}" bind:checked={entry.thinking} onchange={onFieldChange} />
+                <input type="checkbox" id="fb-thinking-{entry.__uid}" bind:checked={entry.thinkingEnabled} onchange={onFieldChange} />
                 <label for="fb-thinking-{entry.__uid}">Enable thinking</label>
               </div>
               <div class="field">
                 <label class="field__label" for="fb-budget-{entry.__uid}">Budget tokens</label>
-                <input class="field__input" type="number" id="fb-budget-{entry.__uid}" step="1" min="1" bind:value={entry.thinking.budgetTokens} disabled={!entry.thinking} oninput={onFieldChange} />
+                <input class="field__input" type="number" id="fb-budget-{entry.__uid}" step="1" min="1" bind:value={entry.budgetTokens} disabled={!entry.thinkingEnabled} oninput={onFieldChange} />
               </div>
             </div>
           </div>
@@ -674,8 +741,10 @@
   .editor__eyebrow { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--vscode-descriptionForeground); }
   .editor__title { margin: 0 0 6px; font-size: 20px; font-weight: 600; color: var(--vscode-foreground); }
   .editor__subtitle { margin: 0; font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 12px; color: var(--vscode-descriptionForeground); word-break: break-all; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .editor__form { display: flex; flex-direction: column; gap: 18px; }
   .editor__section { display: flex; flex-direction: column; gap: 14px; padding: 16px 18px 18px; background: var(--vscode-sideBar-background, transparent); border: 1px solid var(--vscode-widget-border); border-radius: 4px; }
+  .editor__section.drag-over { border-top-color: var(--vscode-focusBorder); box-shadow: inset 0 2px 0 var(--vscode-focusBorder); }
   .editor__section-header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 2px; }
   .editor__section-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin: 0 0 2px; padding: 0; font: inherit; color: inherit; text-align: left; background: transparent; border: 0; cursor: pointer; }
   .editor__section-toggle .editor__section-header { margin-bottom: 0; }
@@ -721,19 +790,12 @@
   .fallback-card__row--thinking { grid-template-columns: 1fr 1fr; align-items: center; }
   .fallback-card__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .fallback-card__heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .fallback-card__handle { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; color: var(--vscode-descriptionForeground); background: transparent; border: 1px solid var(--vscode-widget-border); border-radius: 2px; cursor: grab; }
+  .fallback-card__handle { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; color: var(--vscode-descriptionForeground); background: transparent; border: 1px solid var(--vscode-widget-border); border-radius: 2px; cursor: grab; }
   .fallback-card__handle:active { cursor: grabbing; }
   .fallback-card__handle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
   .fallback-card__title { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--vscode-descriptionForeground); }
   .fallback-card__actions { display: flex; align-items: center; gap: 6px; }
-  .fallback-card__move { background: transparent; border: 1px solid var(--vscode-widget-border); color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: 2px; }
-  .fallback-card__move:hover:not(:disabled) { color: var(--vscode-textLink-foreground); border-color: var(--vscode-textLink-foreground); }
-  .fallback-card__move:disabled { opacity: 0.4; cursor: not-allowed; }
-  .fallback-card__switch { background: transparent; border: 1px solid var(--vscode-textLink-foreground); color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 11px; padding: 2px 8px; border-radius: 2px; font-weight: 500; }
-  .fallback-card__switch:hover { background: var(--vscode-textLink-foreground); color: var(--vscode-button-foreground, #fff); }
-  .fallback-card__switch:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--vscode-descriptionForeground); color: var(--vscode-descriptionForeground); }
-  .fallback-card__switch:disabled:hover { background: transparent; color: var(--vscode-descriptionForeground); }
-  .fallback-card__remove { background: transparent; border: 1px solid transparent; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: 2px; }
+  .fallback-card__remove { display: inline-flex; align-items: center; min-height: 24px; background: transparent; border: 1px solid transparent; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: 2px; }
   .fallback-card__remove:hover { color: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); }
   .fallback-card__checkbox { display: flex; align-items: center; gap: 6px; font-size: 12px; }
   .fallback-card .field__input { font-size: 12px; padding: 4px 6px; }

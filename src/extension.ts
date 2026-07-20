@@ -10,7 +10,7 @@
 //      trigger a tree refresh (debounced inside ConfigStore).
 //   5. Create the `vscode.TreeView` and bind it back to the provider so
 //      `reveal()` works inside command handlers.
-//   6. Register the 12 commands declared in `package.json` via
+//   6. Register the 11 commands declared in `package.json` via
 //      `registerCommands()`.
 //   7. Push every disposable onto `context.subscriptions`. VS Code disposes
 //      them in reverse order on deactivation, which closes the tree view,
