@@ -458,36 +458,220 @@ describe('validateAndClean', () => {
     expect(result).not.toHaveProperty('tools');
   });
 
-  it('clamps temperature below 0 to 0', () => {
-    const result = validateAndClean<AgentConfig>(
-      { temperature: -1 },
-      AGENT_FIELDS,
-    );
-    expect(result.temperature).toBe(0);
+  it.each([
+    [{ model: 7 }, 'Invalid model: must be a string'],
+    [{ variant: false }, 'Invalid variant: must be a string'],
+    [
+      { reasoningEffort: 1 },
+      'Invalid reasoningEffort: must be a string',
+    ],
+    [
+      { temperature: -0.1 },
+      'Invalid temperature: must be a finite number between 0 and 2',
+    ],
+    [
+      { temperature: Number.NaN },
+      'Invalid temperature: must be a finite number between 0 and 2',
+    ],
+    [
+      { top_p: 1.1 },
+      'Invalid top_p: must be a finite number between 0 and 1',
+    ],
+    [{ maxTokens: 1.5 }, 'Invalid maxTokens: must be a positive integer'],
+    [
+      { thinking: { type: 'enabled', budgetTokens: 0 } },
+      'Invalid thinking.budgetTokens: must be a positive integer',
+    ],
+    [
+      { thinking: { type: 'unsupported' } },
+      'Invalid thinking.type: must be enabled or disabled',
+    ],
+  ])('rejects malformed top-level settings %#', (payload, message) => {
+    expect(() =>
+      validateAndClean<AgentConfig>(payload, AGENT_FIELDS),
+    ).toThrow(message);
   });
 
-  it('clamps temperature above 2 to 2', () => {
-    const result = validateAndClean<AgentConfig>(
-      { temperature: 3 },
-      AGENT_FIELDS,
-    );
-    expect(result.temperature).toBe(2);
+  it.each([
+    ['agent', AGENT_FIELDS],
+    ['category', CATEGORY_FIELDS],
+  ])('rejects a blank top-level model for %s payloads', (_type, fields) => {
+    expect(() =>
+      validateAndClean<Record<string, unknown>>({ model: '  ' }, fields),
+    ).toThrow('Invalid model: must be a nonblank string');
   });
 
-  it('passes through valid temperature', () => {
+  it('preserves valid top-level thinking extensions', () => {
     const result = validateAndClean<AgentConfig>(
-      { temperature: 0.7 },
+      {
+        model: 'openai/gpt-5',
+        variant: 'fast',
+        reasoningEffort: 'high',
+        temperature: 0.7,
+        top_p: 0.9,
+        maxTokens: 4096,
+        thinking: {
+          type: 'enabled',
+          budgetTokens: 1024,
+          providerHint: 'adaptive',
+        },
+      },
       AGENT_FIELDS,
     );
-    expect(result.temperature).toBe(0.7);
+
+    expect(result.thinking).toEqual({
+      type: 'enabled',
+      budgetTokens: 1024,
+      providerHint: 'adaptive',
+    });
   });
 
-  it('passes through non-numeric temperature unchanged', () => {
-    const result = validateAndClean<AgentConfig>(
-      { temperature: 'warm' } as unknown as Record<string, unknown>,
+  it.each([
+    [
+      { fallback_models: { model: 'openai/gpt-5-mini' } },
+      'Invalid fallback_models: must be a string or an array',
+    ],
+    [
+      { fallback_models: ['openai/gpt-5-mini', []] },
+      'Invalid fallback_models[1]: must be a string or a plain object',
+    ],
+    [
+      { fallback_models: [{ model: '  ' }] },
+      'Invalid fallback_models[0].model: must be a nonblank string',
+    ],
+    [
+      { fallback_models: [{ model: 'openai/gpt-5-mini', variant: 1 }] },
+      'Invalid fallback_models[0].variant: must be a string',
+    ],
+    [
+      {
+        fallback_models: [
+          { model: 'openai/gpt-5-mini', reasoningEffort: false },
+        ],
+      },
+      'Invalid fallback_models[0].reasoningEffort: must be a string',
+    ],
+    [
+      { fallback_models: [{ model: 'openai/gpt-5-mini', temperature: 'warm' }] },
+      'Invalid fallback_models[0].temperature: must be a finite number between 0 and 2',
+    ],
+    [
+      { fallback_models: [{ model: 'openai/gpt-5-mini', top_p: -1 }] },
+      'Invalid fallback_models[0].top_p: must be a finite number between 0 and 1',
+    ],
+    [
+      { fallback_models: [{ model: 'openai/gpt-5-mini', maxTokens: 0 }] },
+      'Invalid fallback_models[0].maxTokens: must be a positive integer',
+    ],
+    [
+      {
+        fallback_models: [
+          {
+            model: 'openai/gpt-5-mini',
+            thinking: { type: 'enabled', budgetTokens: null },
+          },
+        ],
+      },
+      'Invalid fallback_models[0].thinking.budgetTokens: must be a positive integer',
+    ],
+    [
+      { fallback_models: [{ model: 'openai/gpt-5-mini', thinking: null }] },
+      'Invalid fallback_models[0].thinking: must be a plain object',
+    ],
+  ])('rejects malformed fallback settings %#', (payload, message) => {
+    expect(() =>
+      validateAndClean<AgentConfig>(payload, AGENT_FIELDS),
+    ).toThrow(message);
+  });
+
+  it.each([
+    [
+      'agent',
       AGENT_FIELDS,
+      { fallback_models: '  ' },
+      'Invalid fallback_models: must be a nonblank string',
+    ],
+    [
+      'agent',
+      AGENT_FIELDS,
+      { fallback_models: ['  '] },
+      'Invalid fallback_models[0]: must be a nonblank string',
+    ],
+    [
+      'category',
+      CATEGORY_FIELDS,
+      { fallback_models: '  ' },
+      'Invalid fallback_models: must be a nonblank string',
+    ],
+    [
+      'category',
+      CATEGORY_FIELDS,
+      { fallback_models: ['  '] },
+      'Invalid fallback_models[0]: must be a nonblank string',
+    ],
+  ])(
+    'rejects blank direct fallback strings for %s payloads',
+    (_type, fields, payload, message) => {
+      expect(() =>
+        validateAndClean<Record<string, unknown>>(payload, fields),
+      ).toThrow(message);
+    },
+  );
+
+  it.each([
+    ['agent', AGENT_FIELDS],
+    ['category', CATEGORY_FIELDS],
+  ])('accepts fallback strings and extension fields for %s payloads', (_type, fields) => {
+    const result = validateAndClean<Record<string, unknown>>(
+      {
+        fallback_models: [
+          'openai/gpt-5-mini',
+          {
+            model: 'anthropic/claude-4',
+            providerOption: { cache: 'ephemeral' },
+            thinking: {
+              type: 'enabled',
+              budgetTokens: 2048,
+              providerHint: 'adaptive',
+            },
+          },
+        ],
+      },
+      fields,
     );
-    expect(result).toHaveProperty('temperature');
+
+    expect(result.fallback_models).toEqual([
+      'openai/gpt-5-mini',
+      {
+        model: 'anthropic/claude-4',
+        providerOption: { cache: 'ephemeral' },
+        thinking: {
+          type: 'enabled',
+          budgetTokens: 2048,
+          providerHint: 'adaptive',
+        },
+      },
+    ]);
+  });
+
+  it('deletes fallback_models when the final fallback is explicitly cleared', () => {
+    const agentResult = mergeAgentSave(
+      {
+        model: 'openai/gpt-5',
+        fallback_models: ['openai/gpt-5-mini'],
+      },
+      { fallback_models: null },
+    );
+    const categoryResult = mergeCategorySave(
+      {
+        model: 'openai/gpt-5',
+        fallback_models: ['openai/gpt-5-mini'],
+      },
+      { fallback_models: null },
+    );
+
+    expect(agentResult).not.toHaveProperty('fallback_models');
+    expect(categoryResult).not.toHaveProperty('fallback_models');
   });
 });
 

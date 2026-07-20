@@ -23,6 +23,9 @@ import type { AgentConfig, CategoryConfig } from '../config/schema.js';
 import { BUILTIN_AGENTS, BUILTIN_CATEGORIES } from '../config/schema.js';
 import type { ModelDiscovery } from '../opencode/modelDiscovery.js';
 import type { AgentModelTreeProvider } from './agentModelTreeProvider.js';
+import { validateAndClean } from './editorPayloadValidation.js';
+
+export { validateAndClean } from './editorPayloadValidation.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -91,44 +94,6 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-/**
- * Validate the save payload:
- *   - Must be a plain object (rejects arrays, null, primitives).
- *   - Reject any field not in the allow-list.
- *   - Treat `null` values as "remove" (omit from the cleaned result so
- *     the downstream diff produces a removal patch in jsonc-parser).
- *   - Clamp `temperature` to [0, 2] when numeric.
- */
-export function validateAndClean<T extends object>(
-  raw: unknown,
-  allowedFields: ReadonlySet<string>,
-): T {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error('Save payload must be an object');
-  }
-  const obj = raw as Record<string, unknown>;
-
-  for (const key of Object.keys(obj)) {
-    if (!allowedFields.has(key)) {
-      throw new Error(`Unknown field: ${key}`);
-    }
-  }
-
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value === null) {
-      // Null = remove the field from the override.
-      continue;
-    }
-    if (key === 'temperature' && typeof value === 'number') {
-      cleaned[key] = Math.max(0, Math.min(2, value));
-    } else {
-      cleaned[key] = value;
-    }
-  }
-  return cleaned as T;
 }
 
 /**

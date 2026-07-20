@@ -47,15 +47,16 @@ interface WebviewTestEnv {
  * loaded. Returns the window and arrays that record every message sent
  * to the host and every state snapshot persisted.
  */
-async function createWebviewWindow(): Promise<WebviewTestEnv> {
+async function createWebviewWindow(initialState?: unknown): Promise<WebviewTestEnv> {
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   const js = fs.readFileSync(JS_PATH, 'utf8');
 
   const window = new Window({ url: 'https://example.invalid/' });
+  Object.assign(window, { structuredClone });
 
   const messages: unknown[] = [];
   const states: unknown[] = [];
-  let currentState: unknown = undefined;
+  let currentState: unknown = initialState;
 
   const mockApi: VsCodeApi = {
     postMessage: (msg: unknown) => {
@@ -346,7 +347,7 @@ describe('webview lazy model picker (end-to-end)', () => {
 
     const btnAdd = window.document.getElementById('btn-add-fallback') as HTMLButtonElement;
     expect(btnAdd).not.toBeNull();
-    const list = window.document.getElementById('fallback-list');
+    const list = window.document.getElementById('model-list');
     expect(list).not.toBeNull();
 
     btnAdd.click();
@@ -507,7 +508,7 @@ describe('webview lazy model picker (end-to-end)', () => {
             maxTokens: 8192,
             thinking: { type: 'enabled', budgetTokens: 2048 },
           },
-          { model: 'legacy/fallback' },
+          'legacy/fallback',
           {
             model: 'last/model',
             variant: 'last-variant',
@@ -626,7 +627,7 @@ describe('webview lazy model picker (end-to-end)', () => {
             maxTokens: 8192,
             thinking: { type: 'enabled', budgetTokens: 2048 },
           },
-          { model: 'legacy/fallback' },
+          'legacy/fallback',
         ],
       },
     });
@@ -694,8 +695,8 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(window.document.querySelector('.fallback-card__switch')).toBeNull();
     expect(window.document.querySelector('.fallback-card__move')).toBeNull();
     expect(
-      window.document.querySelector('[data-section="model"] h2')?.textContent,
-    ).toBe('Main model');
+      window.document.querySelector('[data-model-position="main"]')?.textContent,
+    ).toContain('MAIN');
   });
 
   it('does not post modelChanged messages while typing', async () => {
@@ -818,5 +819,168 @@ describe('webview lazy model picker (end-to-end)', () => {
     const variantSelect = window.document.getElementById('f-variant') as HTMLSelectElement;
     const variantValues = Array.from(variantSelect.options).map((o) => o.value);
     expect(variantValues).toEqual(['']);
+  });
+
+  it('renders every configured model in one semantic ordered list with accessible promotion guidance', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model', fallback_models: ['first/fallback', 'second/fallback'] },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const modelList = window.document.querySelector<HTMLOListElement>('ol#model-list');
+    expect(modelList).not.toBeNull();
+    expect(modelList?.querySelectorAll(':scope > li')).toHaveLength(3);
+    expect(modelList?.querySelector('[data-model-position="main"]')?.textContent).toContain('MAIN');
+    expect(modelList?.querySelector('[data-model-position="fallback-1"]')?.textContent).toContain('FALLBACK 1');
+
+    const handle = modelList?.querySelector<HTMLButtonElement>('[data-model-card-uid]');
+    expect(handle?.title).toBe('Drag to reorder. Drop in the first position to replace the Main model.');
+    expect(handle?.getAttribute('aria-describedby')).toContain('model-drag-instructions');
+    expect(window.document.querySelector('[data-section="fallback"]')).toBeNull();
+  });
+
+  it('keeps fallback settings in inherit mode and sends null after removing the final fallback', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model', temperature: 0.4, fallback_models: ['fallback/model'] },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const inheritMode = window.document.querySelector<HTMLSelectElement>(
+      '[data-model-position="fallback-1"] select[name="temperature-mode"]',
+    );
+    expect(inheritMode?.value).toBe('inherit');
+
+    const removeButton = window.document.querySelector<HTMLButtonElement>(
+      '[data-model-position="fallback-1"] .model-card__remove',
+    );
+    removeButton?.click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveButton = window.document.getElementById('btn-save') as HTMLButtonElement;
+    saveButton.click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveMessage = messages.find(
+      (message): message is { command: 'save'; payload: { fallback_models: unknown } } =>
+        typeof message === 'object' &&
+        message !== null &&
+        'command' in message &&
+        message.command === 'save' &&
+        'payload' in message,
+    );
+    expect(saveMessage?.payload.fallback_models).toBeNull();
+  });
+
+  it('announces when a fallback becomes Main and materializes its overrides as shared defaults', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: {
+        model: 'main/model',
+        temperature: 0.7,
+        fallback_models: [{ model: 'fallback/model', temperature: 0.2 }],
+      },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const fallbackHandle = window.document.querySelector<HTMLButtonElement>(
+      '[data-model-position="fallback-1"] [data-model-card-uid]',
+    );
+    fallbackHandle?.dispatchEvent(new window.Event('dragstart', { bubbles: true }));
+    window.document.querySelector('[data-model-position="main"]')?.dispatchEvent(
+      new window.Event('drop', { bubbles: true, cancelable: true }),
+    );
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.getElementById('model-routing-status')?.textContent).toContain('shared defaults');
+    (window.document.getElementById('btn-save') as HTMLButtonElement).click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveMessage = messages.find(
+      (message): message is { command: 'save'; payload: { model: string; temperature: number } } =>
+        typeof message === 'object' &&
+        message !== null &&
+        'command' in message &&
+        message.command === 'save' &&
+        'payload' in message,
+    );
+    expect(saveMessage?.payload).toMatchObject({ model: 'fallback/model', temperature: 0.2 });
+  });
+
+  it('restores dirty routing modes and ignores the matching host init', async () => {
+    const { window, states } = env;
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'main', fallback_models: ['fallback'] } });
+    await window.happyDOM.waitUntilComplete();
+    const mode = window.document.querySelector<HTMLSelectElement>('[data-model-position="fallback-1"] select[name="temperature-mode"]');
+    if (!mode) throw new Error('Temperature mode did not render');
+    mode.value = 'override';
+    mode.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+    const savedState = states.at(-1);
+    const restored = await createWebviewWindow(savedState);
+    restored.window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'host', fallback_models: [] } });
+    await restored.window.happyDOM.waitUntilComplete();
+    expect(restored.window.document.querySelector<HTMLSelectElement>('[data-model-position="fallback-1"] select[name="temperature-mode"]')?.value).toBe('override');
+    await restored.window.happyDOM.close();
+  });
+
+  it('retains fallback override modes through Main to Fallback to Main transitions', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'a', temperature: 0.7, top_p: 0.8, fallback_models: [{ model: 'b', temperature: 0.2 }] } });
+    await window.happyDOM.waitUntilComplete();
+    const promote = (selector: string) => {
+      const handle = window.document.querySelector<HTMLButtonElement>(`${selector} [data-model-card-uid]`);
+      handle?.dispatchEvent(new window.Event('dragstart', { bubbles: true }));
+      window.document.querySelector('[data-model-position="main"]')?.dispatchEvent(new window.Event('drop', { bubbles: true, cancelable: true }));
+    };
+    promote('[data-model-position="fallback-1"]');
+    await window.happyDOM.waitUntilComplete();
+    promote('[data-model-position="fallback-1"]');
+    await window.happyDOM.waitUntilComplete();
+    const fallback = window.document.querySelector('[data-model-position="fallback-1"]');
+    expect(fallback?.querySelector<HTMLSelectElement>('select[name="temperature-mode"]')?.value).toBe('override');
+    expect(fallback?.querySelector<HTMLSelectElement>('select[name="top_p-mode"]')?.value).toBe('inherit');
+  });
+
+  it('keeps unsupported configured defaults operable so they can be cleared before save', async () => {
+    const { window, messages } = env;
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'no-temp', temperature: 0.4 } });
+    window.postMessage({ command: 'modelsLoaded', models: [{ modelId: 'no-temp', capabilities: { temperature: false } }] });
+    await window.happyDOM.waitUntilComplete();
+    const temperature = window.document.getElementById('f-temperature') as HTMLInputElement;
+    expect(temperature.disabled).toBe(false);
+    temperature.value = '';
+    temperature.dispatchEvent(new window.Event('input', { bubbles: true }));
+    (window.document.getElementById('btn-save') as HTMLButtonElement).click();
+    await window.happyDOM.waitUntilComplete();
+    expect(messages.some((message) => typeof message === 'object' && message !== null && 'command' in message && message.command === 'save')).toBe(true);
+  });
+
+  it('marks collapsed fallback capability errors and keeps dirty state after a host error', async () => {
+    const { window, states } = env;
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'main', temperature: 0.4, fallback_models: ['no-temp'] } });
+    window.postMessage({ command: 'modelsLoaded', models: [{ modelId: 'no-temp', capabilities: { temperature: false } }] });
+    await window.happyDOM.waitUntilComplete();
+    const summary = window.document.querySelector('[data-model-position="fallback-1"] summary');
+    expect(summary?.textContent).toContain('Needs attention');
+    expect(summary?.querySelector('.model-card__error-marker.sr-only')).toBeNull();
+    const temperature = window.document.getElementById('f-temperature') as HTMLInputElement;
+    temperature.value = '';
+    temperature.dispatchEvent(new window.Event('input', { bubbles: true }));
+    (window.document.getElementById('btn-save') as HTMLButtonElement).click();
+    window.postMessage({ command: 'error', message: 'save failed' });
+    await window.happyDOM.waitUntilComplete();
+    const state = states.at(-1) as { dirty?: boolean };
+    expect(state.dirty).toBe(true);
   });
 });

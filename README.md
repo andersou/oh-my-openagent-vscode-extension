@@ -16,7 +16,7 @@ The sidebar view shows your active config, all built-in agents and categories wi
 ## Features
 
 - **Agent and category model overrides**: see all 11 built-in agents and 8 built-in categories in a hierarchical tree. Edit any item in the webview form. Saving an edit to a built-in item creates its override. The tree renders labels like `sisyphus → opencode-go/kimi-k2.7-code` so you always know which model is assigned.
-- **Ordered model cards**: the first card is the main model and every later card is a fallback. Drag a card to reorder the list, including dragging a fallback to the first position to promote it. The same drag interaction is keyboard-accessible from each handle: press Space or Enter to pick up, use the arrow keys to move, and press Space or Enter to drop.
+- **Ordered model cards**: position 1 is **Main** and every later card is a fallback. Drag any fallback into position 1 to replace Main. The `Drag` handle explains this on hover and supports keyboard reordering: press Space or Enter to pick up, use Arrow Up or Arrow Down to move, press Space or Enter to drop, or Escape to cancel. Main settings are shared defaults for Main and for inherited fallback fields. Each fallback's Advanced controls let you choose `Inherit default` or `Override`; inherited properties are omitted when saved.
 - **Lazy model picker** — the Model field is populated asynchronously from the local `opencode models --verbose` CLI, with a free-form fallback when the CLI is unavailable. The discovered model IDs appear as autocomplete suggestions alongside each model's capabilities and variants. A reload button lets you re-run discovery at any time.
 - **JSONC preservation** — all writes go through `jsonc-parser` via a per-path diff engine. The `ConfigStore` compares the original and modified config recursively, then calls `modify()` on each changed JSON path individually. Comments, trailing commas, and formatting on untouched keys survive every edit.
 - **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`oh-my-openagent.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
@@ -94,11 +94,15 @@ The **Profiles** group always shows the active state: when no profile is active,
 
 1. Hover over the agent or category and click the pencil inline action, or right-click and choose `Edit Agent` / `Edit Category`. Both built-in items, existing override items, and profile-contained items can be edited.
 2. The webview editor opens with sections for Model, Sampling, Thinking, and Fallback models.
-3. The cards form one ordered model list. The first card is the main model, and later cards are fallbacks. Drag a card to a new position to reorder it or drag a fallback onto the first card to make it the main model. For keyboard reordering, focus a drag handle, press Space or Enter, use Arrow Up or Arrow Down, then press Space or Enter to drop. There are no separate promotion or move controls.
+3. The cards form one ordered model list. Position 1 is **Main**, and later cards are fallbacks. Drag any fallback into position 1 to replace Main. Hover over a `Drag` handle for this reminder. For keyboard reordering, focus a handle, press Space or Enter to pick up, use Arrow Up or Arrow Down to move, press Space or Enter to drop, or Escape to cancel. There are no separate promotion or move controls.
 4. The main Model field is a free-form text input with a lazy datalist. While the editor loads, the extension runs `opencode models --verbose` locally and offers the returned model IDs as autocomplete suggestions, together with each model's capabilities and variants. Any existing model value is preserved, even if it is not in the discovered list.
-5. Hover over the reload button next to the Model field to re-run discovery and refresh the model list at any time.
-6. Change values and click **Save**. Saving a built-in agent or category creates its override in the active config. The sidebar refreshes after the JSONC-preserving write completes. Fields that are not exposed in the form, such as `permission`, `tools`, `prompt`, and `providerOptions`, are preserved rather than overwritten.
-7. Hover over any agent or category leaf in the sidebar to see a tooltip with the configured parameters (temperature, top-p, max tokens, reasoning effort, thinking budget, variant, and fallback models).
+5. Edit Sampling and Thinking below the cards to set the shared defaults. They apply to Main and to every fallback field set to `Inherit default`. In a fallback's Advanced section, use `Override` for a model-specific value or `Inherit default` to use the shared value. Only explicit fallback overrides are written to that fallback entry.
+6. When a fallback becomes Main, its explicit overrides become the active shared defaults. Its `Inherit default` and `Override` choices remain attached to the model and return when it becomes a fallback again during the same editor session.
+7. Hover over the reload button next to the Model field to re-run discovery and refresh the model list at any time. If discovered capabilities do not support an effective setting, including an inherited setting, the editor marks the conflict and blocks saving until you clear or change it.
+8. Use a fallback's **Remove** button to remove it. Removing the final fallback explicitly removes the fallback chain from the saved config.
+9. Change values and click **Save**. Saving a built-in agent or category creates its override in the active config. The sidebar refreshes after the JSONC-preserving write completes. Fields that are not exposed in the form, such as `permission`, `tools`, `prompt`, and `providerOptions`, are preserved rather than overwritten.
+10. The upstream config can store only top-level defaults and fallback entries. It cannot represent the fallback intent attached to the model that is currently Main after the editor is closed and reopened. Transient webview restoration preserves dirty in-panel state, but a saved config cannot preserve that Main model's fallback intent across a new editor session.
+11. Hover over any agent or category leaf in the sidebar to see a tooltip with the configured parameters (temperature, top-p, max tokens, reasoning effort, thinking budget, variant, and fallback models).
 
 ### Context menu actions
 
@@ -167,7 +171,8 @@ extension.ts  (activation orchestrator)
      |
      ├── ui/
      │   ├── agentModelTreeProvider.ts  (sidebar TreeDataProvider)
-     │   └── agentEditorPanel.ts  (webview panel singleton)
+     │   ├── agentEditorPanel.ts  (webview panel singleton)
+     │   └── webview/  (ordered model routing and capability validation)
      │
      └── config/
          ├── schema.ts  (TypeScript types for OmO config)
@@ -227,7 +232,9 @@ Tests are written with Vitest. The suite covers the extension's main behaviors:
 | `smoke.test.ts` | End-to-end editor saves across stores, panel, tree, and JSONC writes |
 | `packageMenus.test.ts` | The 11-command contribution surface and contextual menu visibility |
 | `configStore.test.ts` | Config discovery, JSONC parsing, formatting-preserving updates, key removal, and file watching |
-| `webview.test.ts` | Model picker behavior, ordered card serialization, drag promotion, fallback editing, and persisted state |
+| `modelRouting.test.ts` | Ordered-card promotion, shared defaults, fallback inheritance and overrides, serialization, removal, and session-bound routing intent |
+| `modelCapabilities.test.ts` | Capability validation for effective inherited and overridden settings |
+| `webview.test.ts` | Model picker behavior and ordered-list editor integration, including drag promotion, fallback editing, and persisted state |
 
 The JSONC preservation tests verify that comments, trailing commas, and formatting survive round-trips through `updateConfig()` and profile activation — confirmed against real config fixtures with inline comments and trailing commas.
 
