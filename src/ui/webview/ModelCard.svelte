@@ -136,10 +136,7 @@
     {#if errors.model}<p class="field__error" id={`model-error-${card.uid}`}>{errors.model}</p>{/if}
   </div>
 
-  {#if isMain}
-    <p class="model-card__note">Main defaults are edited below. Attached fallback override choices travel with this model when the order changes.</p>
-  {:else}
-    <details class="model-card__advanced">
+  <details class="model-card__advanced">
       <summary class:error={hasAdvancedError}>Advanced: {overrideCount === 0 ? 'All settings inherited' : `${overrideCount} override${overrideCount === 1 ? '' : 's'}`}{#if hasAdvancedError}<span class="model-card__error-marker">Needs attention</span>{/if}</summary>
       <div class="model-card__advanced-body">
         <div class="field-grid">
@@ -202,6 +199,5 @@
           {#if !reasoningSupported && isOverride('thinking')}<p class="field__error">This model does not support thinking controls.</p>{/if}
         </div>
       </div>
-    </details>
-  {/if}
+  </details>
 </article>

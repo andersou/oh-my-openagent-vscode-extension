@@ -67,17 +67,24 @@ function createCard(entry, index, main) {
 /** @param {RoutingDefaults} defaults @returns {CardOverrides} */
 function overridesFromDefaults(defaults) { return createOverrides(clone(defaults), true); }
 
-/** @param {ModelCard} card @param {RoutingDefaults} defaults @returns {RoutingDefaults} */
-function materializeOverrides(card, defaults) {
-  const next = clone(defaults);
-  for (const key of SETTINGS) {
-    if (card.overrides[key].mode === 'override') next[key] = clone(card.overrides[key].value);
-  }
-  return next;
+/** @param {Record<string, unknown>} overrides @returns {CardOverrides} */
+function overridesFromMainOverrides(overrides) {
+  return createOverrides(overrides, true);
 }
 
 /** @param {ModelCard} card @param {RoutingDefaults} defaults @returns {ModelCard} */
-function demoteLoadedMain(card, defaults) { return { ...card, provenance: 'session', overrides: overridesFromDefaults(defaults) }; }
+function demoteLoadedMain(card, defaults) {
+  const next = clone(card.overrides);
+  for (const key of SETTINGS) {
+    if (next[key].mode === 'inherit') {
+      const value = defaults[key];
+      if (value !== undefined && value !== null) {
+        next[key] = { mode: 'override', value: clone(value) };
+      }
+    }
+  }
+  return { ...card, provenance: 'session', overrides: next };
+}
 
 /** @param {unknown} config @returns {ModelRoutingState} */
 export function loadModelRouting(config) {
@@ -85,8 +92,9 @@ export function loadModelRouting(config) {
   /** @type {RoutingDefaults} */
   const defaults = {};
   for (const key of SETTINGS) {
-    if (owns(input, key)) defaults[key] = clone(input[key]);
+    if (owns(input, key) && input[key] !== null) defaults[key] = clone(input[key]);
   }
+  const mainOverrides = isRecord(input.main_overrides) ? input.main_overrides : {};
   const fallbackValue = input.fallback_models;
   const fallbackEntries = typeof fallbackValue === 'string'
     ? [fallbackValue]
@@ -96,10 +104,16 @@ export function loadModelRouting(config) {
   return {
     defaults,
     cards: [
-      createCard(input, 0, true),
+      createMainCard(input, 0, mainOverrides),
       ...fallbackEntries.map((entry, index) => createCard(entry, index + 1, false)),
     ],
   };
+}
+
+/** @param {Record<string, unknown>} entry @param {number} index @param {Record<string, unknown>} mainOverrides @returns {ModelCard} */
+function createMainCard(entry, index, mainOverrides) {
+  const card = createCard(entry, index, true);
+  return { ...card, overrides: overridesFromMainOverrides(mainOverrides) };
 }
 
 /** @param {ModelRoutingState} state @param {string} uid @param {number} toIndex @returns {ModelRoutingState} */
@@ -125,7 +139,7 @@ export function moveModelCard(state, uid, toIndex) {
       : card)
     : reordered;
   return {
-    defaults: materializeOverrides(newMain, state.defaults),
+    defaults: clone(state.defaults),
     cards: adjusted,
   };
 }
@@ -147,12 +161,7 @@ export function setCardModel(state, uid, model) { return updateCard(state, uid, 
 
 /** @param {ModelRoutingState} state @param {SettingKey} key @param {unknown} value @returns {ModelRoutingState} */
 export function setMainDefault(state, key, value) {
-  const main = state.cards[0];
-  const next = updateCard(state, main?.uid ?? '', (card) => {
-    if (card.overrides[key].mode === 'inherit') return card;
-    const entry = value === undefined ? {} : { [key]: value };
-    return { ...card, overrides: { ...card.overrides, [key]: overrideFrom(entry, key, true) } };
-  });
+  const next = { defaults: clone(state.defaults), cards: state.cards.map(clone) };
   if (value === undefined) delete next.defaults[key];
   else next.defaults[key] = clone(value);
   return next;
@@ -199,6 +208,17 @@ function serializeFallback(card) {
   return output;
 }
 
+/** @param {ModelCard} card @returns {Record<string, unknown>} */
+function serializeMainOverrides(card) {
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  for (const key of SETTINGS) {
+    const setting = card.overrides[key];
+    if (setting.mode === 'override') output[key] = serializedValue(key, setting.value);
+  }
+  return output;
+}
+
 /** @param {ModelRoutingState} state @returns {Record<string, unknown>} */
 export function serializeModelRouting(state) {
   const main = state.cards[0];
@@ -211,6 +231,8 @@ export function serializeModelRouting(state) {
   output.fallback_models = state.cards.length === 1
     ? null
     : state.cards.slice(1).map(serializeFallback);
+  const mainOverrides = main === undefined ? {} : serializeMainOverrides(main);
+  output.main_overrides = Object.keys(mainOverrides).length === 0 ? null : mainOverrides;
   return output;
 }
 
@@ -260,6 +282,14 @@ export function validateModelRouting(state) {
         const message = numericError(key, value);
         if (message !== null) addError(errors, main.uid, key, message);
       } else if (key === 'thinking') validateThinking(errors, main.uid, value);
+    }
+    for (const key of SETTINGS) {
+      const setting = main.overrides[key];
+      if (setting.mode !== 'override') continue;
+      if (NUMERIC_SETTINGS.has(key)) {
+        const message = numericError(key, setting.value);
+        if (message !== null) addError(errors, main.uid, key, message);
+      } else if (key === 'thinking') validateThinking(errors, main.uid, setting.value);
     }
   }
   for (const card of state.cards.slice(1)) {

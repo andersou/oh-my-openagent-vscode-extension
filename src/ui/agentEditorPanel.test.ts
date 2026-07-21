@@ -673,6 +673,35 @@ describe('validateAndClean', () => {
     expect(agentResult).not.toHaveProperty('fallback_models');
     expect(categoryResult).not.toHaveProperty('fallback_models');
   });
+
+  it('accepts and preserves valid main_overrides', () => {
+    const result = validateAndClean<AgentConfig>(
+      { model: 'main/model', main_overrides: { temperature: 0.2, variant: 'fast' } },
+      AGENT_FIELDS,
+    );
+    expect(result.main_overrides).toEqual({ temperature: 0.2, variant: 'fast' });
+  });
+
+  it('deletes main_overrides when it is null in the payload', () => {
+    const result = mergeAgentSave(
+      { model: 'old', main_overrides: { temperature: 0.2 } },
+      { model: 'new', main_overrides: null },
+    );
+    expect(result).not.toHaveProperty('main_overrides');
+  });
+
+  it.each([
+    [{ main_overrides: 'not-an-object' }, 'Invalid main_overrides: must be a plain object or null'],
+    [{ main_overrides: { model: 'x' } }, 'Invalid main_overrides.model: must not be set in main overrides'],
+    [{ main_overrides: { unknownField: 1 } }, 'Invalid main_overrides: unknown field: unknownField'],
+    [{ main_overrides: { temperature: -0.1 } }, 'Invalid main_overrides.temperature: must be a finite number between 0 and 2'],
+    [{ main_overrides: { maxTokens: 0 } }, 'Invalid main_overrides.maxTokens: must be a positive integer'],
+    [{ main_overrides: { thinking: { type: 'bad' } } }, 'Invalid main_overrides.thinking.type: must be enabled or disabled'],
+  ])('rejects malformed main_overrides %#', (payload, message) => {
+    expect(() =>
+      validateAndClean<AgentConfig>(payload, AGENT_FIELDS),
+    ).toThrow(message);
+  });
 });
 
 function makeMockWebviewPanel() {

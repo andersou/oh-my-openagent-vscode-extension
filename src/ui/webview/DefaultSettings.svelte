@@ -38,7 +38,7 @@
 </script>
 
 <section class="editor__section" data-section="defaults" aria-labelledby="default-settings-heading">
-  <header class="editor__section-header"><h2 class="editor__section-title" id="default-settings-heading">Default generation settings</h2><p class="editor__section-desc">These settings apply to Main and are inherited by fallback fields set to Inherit default.</p></header>
+  <header class="editor__section-header"><h2 class="editor__section-title" id="default-settings-heading">Default generation settings</h2><p class="editor__section-desc">These shared defaults apply only to properties set to Inherit default.</p></header>
   <div class="field-grid">
     <div class="field"><label class="field__label" for="f-variant">Variant</label><select class="field__input" id="f-variant" value={defaults.variant ?? ''} onchange={(event) => input('variant', event)}>{#each variants as variant}<option value={variant}>{variant || '(default)'}</option>{/each}</select>{#if errors.variant}<p class="field__error">{errors.variant}</p>{/if}</div>
     <div class="field"><label class="field__label" for="f-reasoning">Reasoning effort</label><select class="field__input" id="f-reasoning" value={defaults.reasoningEffort ?? ''} disabled={!reasoningSupported && !hasValue(defaults.reasoningEffort)} title={!reasoningSupported ? 'This model does not support reasoning controls.' : ''} onchange={(event) => input('reasoningEffort', event)}>{#each reasoning as effort}<option value={effort}>{effort || '(default)'}</option>{/each}</select>{#if errors.reasoningEffort}<p class="field__error">{errors.reasoningEffort}</p>{/if}</div>

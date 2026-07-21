@@ -35,6 +35,8 @@
   let statusTimer = null;
 
   let mainCard = $derived(routing.cards[0]);
+  let hasInheritedSettings = $derived(routing.cards.some((card) =>
+    Object.values(card.overrides).some((setting) => setting.mode === 'inherit')));
   let validationErrors = $derived(mergeValidationErrors(validateModelRouting(routingSnapshot()), validateModelCapabilities(routingSnapshot(), modelMetadata)));
   let mainMetadata = $derived(modelMetadata[mainCard?.model] ?? null);
 
@@ -131,7 +133,7 @@
     const nextMain = next.cards[0]?.uid;
     changeRouting(next);
     if (nextMain === uid && beforeMain !== uid) {
-      routingAnnouncement = 'Main model replaced. Its overrides are now shared defaults for inheriting fallbacks.';
+      routingAnnouncement = 'Main model replaced. Model-specific settings and shared defaults were preserved.';
       dragAnnouncement = `${positionName(0)} replaced.`;
     }
     return true;
@@ -279,7 +281,9 @@
       <button type="button" class="vscode-button vscode-button--secondary" id="btn-add-fallback" onclick={onAddFallback}>Add fallback</button>
     </section>
 
-    <DefaultSettings defaults={routing.defaults} metadata={mainMetadata} errors={validationErrors[mainCard?.uid] ?? {}} onDefault={onDefault} />
+    {#if hasInheritedSettings}
+      <DefaultSettings defaults={routing.defaults} metadata={mainMetadata} errors={validationErrors[mainCard?.uid] ?? {}} onDefault={onDefault} />
+    {/if}
 
     <datalist id="model-datalist">{#each modelDatalist as id}<option value={id}></option>{/each}</datalist>
     <p class="field__model-status field__model-status--{modelStatus.type}" id="model-status" role="status" aria-live="polite" hidden={!modelStatus.message}>{modelStatus.message}</p>

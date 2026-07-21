@@ -108,6 +108,32 @@ function validateModelSettings(
   return cleaned;
 }
 
+function validateMainOverrides(value: unknown): Record<string, unknown> | null {
+  if (value === null) {
+    return null;
+  }
+  if (!isPlainObject(value)) {
+    invalidSetting('main_overrides', 'must be a plain object or null');
+  }
+  if (Object.hasOwn(value, 'model')) {
+    invalidSetting('main_overrides.model', 'must not be set in main overrides');
+  }
+  const allowed = new Set([
+    'variant',
+    'reasoningEffort',
+    'temperature',
+    'top_p',
+    'maxTokens',
+    'thinking',
+  ]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      invalidSetting('main_overrides', `unknown field: ${key}`);
+    }
+  }
+  return validateModelSettings(value, 'main_overrides', false);
+}
+
 function validateFallbackModels(value: unknown): unknown {
   if (typeof value === 'string') {
     validateNonblankString(value, 'fallback_models');
@@ -154,6 +180,9 @@ export function validateAndClean<T extends object>(
   const validated = validateModelSettings(cleaned, '', false);
   if (Object.hasOwn(validated, 'fallback_models')) {
     validated.fallback_models = validateFallbackModels(validated.fallback_models);
+  }
+  if (Object.hasOwn(validated, 'main_overrides')) {
+    validated.main_overrides = validateMainOverrides(validated.main_overrides);
   }
   return validated as T;
 }

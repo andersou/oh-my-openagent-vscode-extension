@@ -490,12 +490,12 @@ describe('webview lazy model picker (end-to-end)', () => {
       target: { type: 'agent', name: 'sisyphus', profile: null },
       payload: {
         model: 'promoted/model',
-        variant: 'promoted-variant',
-        reasoningEffort: 'low',
-        temperature: 0.25,
-        top_p: 0.3,
-        maxTokens: 4096,
-        thinking: { type: 'enabled', budgetTokens: 512 },
+        variant: 'main-variant',
+        reasoningEffort: 'high',
+        temperature: 0.7,
+        top_p: 0.8,
+        maxTokens: 8192,
+        thinking: { type: 'enabled', budgetTokens: 2048 },
         fallback_models: [
           {
             model: 'main/model',
@@ -610,12 +610,12 @@ describe('webview lazy model picker (end-to-end)', () => {
       target: { type: 'agent', name: 'sisyphus', profile: null },
       payload: {
         model: 'promoted/model',
-        variant: 'promoted-variant',
-        reasoningEffort: 'low',
-        temperature: 0.25,
-        top_p: 0.3,
-        maxTokens: 4096,
-        thinking: { type: 'enabled', budgetTokens: 512 },
+        variant: 'main-variant',
+        reasoningEffort: 'high',
+        temperature: 0.7,
+        top_p: 0.8,
+        maxTokens: 8192,
+        thinking: { type: 'enabled', budgetTokens: 2048 },
         fallback_models: [
           {
             model: 'main/model',
@@ -878,7 +878,57 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(saveMessage?.payload.fallback_models).toBeNull();
   });
 
-  it('announces when a fallback becomes Main and materializes its overrides as shared defaults', async () => {
+  it('renders advanced inherit and override controls for Main without a remove action', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model', temperature: 0.7 },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const main = window.document.querySelector('[data-model-position="main"]');
+    expect(main?.querySelector('details.model-card__advanced')).not.toBeNull();
+    expect(main?.querySelector<HTMLSelectElement>('select[name="temperature-mode"]')?.value).toBe('inherit');
+    expect(main?.querySelector('.model-card__remove')).toBeNull();
+  });
+
+  it('shows defaults while any card setting inherits and hides them when every setting is explicit', async () => {
+    const { window } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.querySelector('[data-section="defaults"]')).not.toBeNull();
+
+    for (const name of ['variant-mode', 'reasoningEffort-mode', 'temperature-mode', 'top_p-mode', 'maxTokens-mode', 'thinking-mode']) {
+      const mode = window.document.querySelector<HTMLSelectElement>(`[data-model-position="main"] select[name="${name}"]`);
+      expect(mode).not.toBeNull();
+      if (!mode) throw new Error(`${name} control did not render`);
+      mode.value = 'override';
+      mode.dispatchEvent(new window.Event('change', { bubbles: true }));
+    }
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.querySelector('[data-section="defaults"]')).toBeNull();
+
+    const temperatureMode = window.document.querySelector<HTMLSelectElement>(
+      '[data-model-position="main"] select[name="temperature-mode"]',
+    );
+    if (!temperatureMode) throw new Error('Temperature mode control did not render');
+    temperatureMode.value = 'inherit';
+    temperatureMode.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.querySelector('[data-section="defaults"]')).not.toBeNull();
+  });
+
+  it('announces that promotion preserves model settings and shared defaults', async () => {
     const { window, messages } = env;
     window.postMessage({
       command: 'init',
@@ -901,7 +951,9 @@ describe('webview lazy model picker (end-to-end)', () => {
     );
     await window.happyDOM.waitUntilComplete();
 
-    expect(window.document.getElementById('model-routing-status')?.textContent).toContain('shared defaults');
+    expect(window.document.getElementById('model-routing-status')?.textContent).toContain(
+      'Model-specific settings and shared defaults were preserved.',
+    );
     (window.document.getElementById('btn-save') as HTMLButtonElement).click();
     await window.happyDOM.waitUntilComplete();
 
@@ -913,7 +965,11 @@ describe('webview lazy model picker (end-to-end)', () => {
         message.command === 'save' &&
         'payload' in message,
     );
-    expect(saveMessage?.payload).toMatchObject({ model: 'fallback/model', temperature: 0.2 });
+    expect(saveMessage?.payload).toMatchObject({
+      model: 'fallback/model',
+      temperature: 0.7,
+      fallback_models: [{ model: 'main/model', temperature: 0.7 }],
+    });
   });
 
   it('restores dirty routing modes and ignores the matching host init', async () => {

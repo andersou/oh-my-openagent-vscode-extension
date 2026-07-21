@@ -53,6 +53,8 @@ export interface FallbackModelConfig {
   thinking?: ThinkingConfig;
 }
 
+export type MainOverrides = Omit<FallbackModelConfig, 'model'>;
+
 export type FallbackModels = string | Array<string | FallbackModelConfig>;
 export type ToolConfig = Record<string, boolean>;
 export type ProviderOptions = Record<string, unknown>;
@@ -69,6 +71,7 @@ export interface AgentConfig {
   model?: string;
   variant?: string;
   fallback_models?: FallbackModels;
+  main_overrides?: MainOverrides;
   temperature?: number;
   top_p?: number;
   maxTokens?: number;
@@ -90,6 +93,7 @@ export interface CategoryConfig {
   model?: string;
   variant?: string;
   fallback_models?: FallbackModels;
+  main_overrides?: MainOverrides;
   temperature?: number;
   top_p?: number;
   maxTokens?: number;

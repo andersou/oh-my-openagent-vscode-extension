@@ -33,7 +33,7 @@ describe('model routing state', () => {
     expect(state.cards[2].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
   });
 
-  it('materializes an explicit fallback value when it becomes Main', () => {
+  it('keeps an explicit promoted temperature separate from global defaults', () => {
     // Given: Main uses 0.7 and a fallback explicitly overrides it with 0.2.
     const config = { model: 'main/model', temperature: 0.7,
       fallback_models: [{ model: 'fallback/model', temperature: 0.2 }] };
@@ -43,10 +43,28 @@ describe('model routing state', () => {
     // When: the fallback is moved to index zero by stable UID.
     const moved = moveModelCard(state, state.cards[1].uid, 0);
 
-    // Then: its explicit value is effective and the caller state is untouched.
-    expect(moved.defaults.temperature).toBe(0.2);
+    // Then: its explicit value is effective without changing global defaults, and the caller state is untouched.
+    expect(moved.defaults.temperature).toBe(0.7);
+    expect(moved.cards[0].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
     expect(moved.cards[1].overrides.temperature).toEqual({ mode: 'override', value: 0.7 });
     expect(state).toEqual(beforeMove);
+  });
+
+  it('keeps a variant-less promoted fallback inheriting the existing global variant', () => {
+    // Given: Main owns variant fast while the fallback has no variant property.
+    const state = loadModelRouting({ model: 'main/model', variant: 'fast',
+      fallback_models: [{ model: 'fallback/model' }] });
+    expect(state.cards[1].overrides.variant).toEqual({ mode: 'inherit' });
+
+    // When: the variant-less fallback is promoted to Main.
+    const moved = moveModelCard(state, state.cards[1].uid, 0);
+    const payload = serializeModelRouting(moved);
+
+    // Then: the promoted Main remains inheriting while the unchanged global variant remains effective.
+    expect(moved.cards[0].overrides.variant).toEqual({ mode: 'inherit' });
+    expect(moved.defaults.variant).toBe('fast');
+    expect(moved.cards[1].overrides.variant).toEqual({ mode: 'override', value: 'fast' });
+    expect(payload.variant).toBe('fast');
   });
 
   it('leaves defaults unchanged when an inheriting fallback becomes Main', () => {
@@ -63,7 +81,7 @@ describe('model routing state', () => {
     expect(moved.cards[1].overrides.temperature).toEqual({ mode: 'override', value: 0.7 });
   });
 
-  it('restores old Main defaults and promoted-card modes across A to B to A', () => {
+  it('retains defaults and original card modes across A to B to A', () => {
     // Given: B overrides temperature but inherits top-p from A.
     const initial = loadModelRouting({ model: 'a/model', temperature: 0.7, top_p: 0.8,
       fallback_models: [{ model: 'b/model', temperature: 0.2 }] });
@@ -74,15 +92,15 @@ describe('model routing state', () => {
     const bMain = moveModelCard(initial, bUid, 0);
     const aMainAgain = moveModelCard(bMain, aUid, 0);
 
-    // Then: A's defaults return while B keeps its original override modes.
+    // Then: shared defaults and both cards' original modes remain stable.
     expect(aMainAgain.defaults).toEqual({ temperature: 0.7, top_p: 0.8 });
     expect(aMainAgain.cards[1].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
     expect(aMainAgain.cards[1].overrides.top_p).toEqual({ mode: 'inherit' });
     expect(serializeModelRouting(aMainAgain).fallback_models).toEqual([{ model: 'b/model', temperature: 0.2 }]);
   });
 
-  it('documents the save and reopen limit of session-only inheritance intent', () => {
-    // Given: B inherits top-p before it is promoted over A.
+  it('preserves promoted Main overrides across save and reopen via main_overrides', () => {
+    // Given: B explicitly overrides temperature before it is promoted over A.
     const initial = loadModelRouting({ model: 'a/model', temperature: 0.7, top_p: 0.8,
       fallback_models: [{ model: 'b/model', temperature: 0.2 }] });
     const promoted = moveModelCard(initial, initial.cards[1].uid, 0);
@@ -93,10 +111,13 @@ describe('model routing state', () => {
     const reopened = loadModelRouting(persisted);
     const restored = moveModelCard(reopened, reopened.cards[1].uid, 0);
 
-    // Then: B's inherited top-p is necessarily reified after the session boundary.
+    // Then: B's explicit temperature override survives in main_overrides; shared defaults stay unchanged.
     expect(saved).toEqual({ model: 'b/model', variant: null, reasoningEffort: null,
-      temperature: 0.2, top_p: 0.8, maxTokens: null, thinking: null,
+      temperature: 0.7, top_p: 0.8, maxTokens: null, thinking: null,
+      main_overrides: { temperature: 0.2 },
       fallback_models: [{ model: 'a/model', temperature: 0.7, top_p: 0.8 }] });
+    expect(promoted.cards[0].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
+    expect(reopened.cards[0].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
     expect(restored.cards[1].overrides.top_p).toEqual({ mode: 'override', value: 0.8 });
   });
 
@@ -250,23 +271,23 @@ describe('model routing state', () => {
     expect(payload.fallback_models).toEqual([{ model: 'fallback/model' }]);
   });
 
-  it('keeps an edited explicit value attached when promoted Main is demoted', () => {
+  it('does not change Main card modes or overrides when a global default is edited', () => {
     // Given: fallback B explicitly overrides A's temperature before promotion.
     const initial = loadModelRouting({
       model: 'a/model', temperature: 0.7,
       fallback_models: [{ model: 'b/model', temperature: 0.2 }],
     });
-    const aUid = initial.cards[0].uid;
     const promoted = moveModelCard(initial, initial.cards[1].uid, 0);
 
-    // When: B's Main default is edited and B is subsequently demoted.
+    // When: B's global default is edited.
     const edited = setMainDefault(promoted, 'temperature', 0.4);
-    const demoted = moveModelCard(edited, aUid, 0);
 
-    // Then: B retains the edited explicit override rather than its loaded value.
-    expect(demoted.cards[1].overrides.temperature).toEqual({ mode: 'override', value: 0.4 });
-    expect(serializeModelRouting(demoted).fallback_models).toEqual([
-      { model: 'b/model', temperature: 0.4 },
+    // Then: only the global default changes; B's explicit override remains untouched.
+    expect(edited.defaults.temperature).toBe(0.4);
+    expect(edited.cards[0].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
+    expect(edited.cards[1].overrides.temperature).toEqual({ mode: 'override', value: 0.7 });
+    expect(serializeModelRouting(edited).fallback_models).toEqual([
+      { model: 'a/model', temperature: 0.7 },
     ]);
   });
 
@@ -334,6 +355,7 @@ describe('model routing state', () => {
     // Then: an old persisted chain will be deleted explicitly.
     expect(payload).toEqual({ model: 'main/model', variant: null, reasoningEffort: null,
       temperature: 0.7, top_p: null, maxTokens: null, thinking: null,
+      main_overrides: null,
       fallback_models: null });
   });
 
@@ -361,5 +383,88 @@ describe('model routing state', () => {
     const invalidFields = ['model', 'temperature', 'top_p', 'maxTokens', 'budgetTokens'] as const;
     expect(Object.keys(errors[state.cards[0].uid])).toEqual(invalidFields);
     expect(Object.keys(errors[state.cards[1].uid])).toEqual(invalidFields);
+  });
+
+  it('loads main_overrides into Main card override modes', () => {
+    // Given: a saved config with shared defaults and Main-specific overrides.
+    const state = loadModelRouting({
+      model: 'main/model', temperature: 0.7,
+      main_overrides: { temperature: 0.2, variant: 'fast' },
+      fallback_models: ['fallback/model'],
+    });
+
+    // Then: Main carries its explicit overrides while shared defaults stay separate.
+    expect(state.defaults.temperature).toBe(0.7);
+    expect(state.cards[0].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
+    expect(state.cards[0].overrides.variant).toEqual({ mode: 'override', value: 'fast' });
+    expect(state.cards[0].overrides.top_p).toEqual({ mode: 'inherit' });
+    expect(state.cards[1].overrides.temperature).toEqual({ mode: 'inherit' });
+  });
+
+  it('round-trips Main overrides through serialize and reload', () => {
+    // Given: Main has explicit overrides set via setCardOverride.
+    const state = loadModelRouting({ model: 'main/model', temperature: 0.7,
+      fallback_models: ['fallback/model'] });
+    const edited = setCardOverride(state, state.cards[0].uid, 'temperature', {
+      mode: 'override', value: 0.2,
+    });
+
+    // When: the state is serialized and reloaded.
+    const saved = serializeModelRouting(edited);
+    const persisted = Object.fromEntries(Object.entries(saved).filter(([, value]) => value !== null));
+    const reopened = loadModelRouting(persisted);
+
+    // Then: Main's explicit override survives the round-trip; shared defaults remain unchanged.
+    expect(saved.main_overrides).toEqual({ temperature: 0.2 });
+    expect(reopened.cards[0].overrides.temperature).toEqual({ mode: 'override', value: 0.2 });
+    expect(reopened.defaults.temperature).toBe(0.7);
+  });
+
+  it('ignores null top-level defaults on load without creating invalid fallback overrides on demotion', () => {
+    // Given: a saved payload with null deletion sentinels for unset defaults.
+    const saved = {
+      model: 'main/model', temperature: 0.7,
+      variant: null, reasoningEffort: null, top_p: null, maxTokens: null, thinking: null,
+      main_overrides: null,
+      fallback_models: ['fallback/model'],
+    };
+    const state = loadModelRouting(saved);
+
+    // When: the fallback is promoted to Main, then demoted back.
+    const promoted = moveModelCard(state, state.cards[1].uid, 0);
+    const demoted = moveModelCard(promoted, state.cards[0].uid, 0);
+
+    // Then: no fallback object contains a null override for an unset default.
+    expect(promoted.defaults).toEqual({ temperature: 0.7 });
+    expect(promoted.cards[1].overrides.top_p).toEqual({ mode: 'inherit' });
+    expect(promoted.cards[1].overrides.maxTokens).toEqual({ mode: 'inherit' });
+    const payload = serializeModelRouting(demoted);
+    expect(payload.fallback_models).toEqual(['fallback/model']);
+  });
+
+  it('validates Main card overrides the same as fallback overrides', () => {
+    // Given: Main has an invalid explicit temperature override.
+    const state = loadModelRouting({ model: 'main/model', temperature: 0.7 });
+    const edited = setCardOverride(state, state.cards[0].uid, 'temperature', {
+      mode: 'override', value: -0.1,
+    });
+
+    // When: the editable state is validated.
+    const errors = validateModelRouting(edited);
+
+    // Then: the invalid Main override is reported.
+    expect(errors[edited.cards[0].uid].temperature).toBe('Must be between 0 and 2');
+  });
+
+  it('serializes main_overrides as null when Main has no explicit overrides', () => {
+    // Given: Main inherits all settings.
+    const state = loadModelRouting({ model: 'main/model', temperature: 0.7,
+      fallback_models: ['fallback/model'] });
+
+    // When: the state is serialized.
+    const payload = serializeModelRouting(state);
+
+    // Then: main_overrides is null so any previously saved object is deleted.
+    expect(payload.main_overrides).toBeNull();
   });
 });
