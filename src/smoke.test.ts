@@ -190,6 +190,7 @@ describe('smoke: end-to-end editor flow', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     sendToWebview('save', {
+      target: { type: 'agent', name: 'sisyphus', profile: null },
       payload: {
         model: 'anthropic/claude-haiku',
         temperature: 0.5,

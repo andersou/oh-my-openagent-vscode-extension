@@ -18,6 +18,7 @@
 
   let entityKind = $state(null);
   let entityName = $state(null);
+  let entityProfile = $state(null);
   let routing = $state(loadModelRouting({}));
   let initialized = $state(false);
   let formDirty = $state(false);
@@ -41,8 +42,22 @@
   function postMessage(message) { getApi()?.postMessage(message); }
   function serializeValues() { return serializeModelRouting(routingSnapshot()); }
   function routingSnapshot() { return JSON.parse(JSON.stringify(routing)); }
-  function persist() { persistEditorState(getApi(), { kind: entityKind, name: entityName, routing: routingSnapshot(), dirty: formDirty, values: serializeValues() }); }
+  function currentTarget() {
+    if ((entityKind !== 'agent' && entityKind !== 'category') || typeof entityName !== 'string') return null;
+    return { type: entityKind, name: entityName, profile: entityProfile ?? null };
+  }
+  function matchesCurrentTarget(target) {
+    const current = currentTarget();
+    return current !== null && target?.type === current.type && target?.name === current.name && (target?.profile ?? null) === current.profile;
+  }
+  function persist() { persistEditorState(getApi(), { kind: entityKind, name: entityName, profile: entityProfile, routing: routingSnapshot(), dirty: formDirty, values: serializeValues() }); }
   function restorePersisted() { return restoredEditorState(getApi()); }
+  function setDirty(dirty) {
+    formDirty = dirty;
+    persist();
+    const target = currentTarget();
+    if (target) postMessage({ command: 'dirtyState', target, dirty });
+  }
 
   function setStatus(message, type = 'info') {
     if (statusTimer) clearTimeout(statusTimer);
@@ -56,15 +71,18 @@
 
   function changeRouting(next) {
     routing = next;
-    formDirty = true;
-    persist();
+    setDirty(true);
   }
 
 
   function applyInit(data) {
-    if (formDirty && data?.type === entityKind && data?.name === entityName) return;
+    if (formDirty && matchesCurrentTarget(data)) {
+      setDirty(true);
+      return;
+    }
     entityKind = data?.type ?? null;
     entityName = data?.name ?? null;
+    entityProfile = data?.profile ?? null;
     const source = data?.config && typeof data.config === 'object' ? data.config : {};
     const fallbackModels = Array.isArray(source.fallback_models)
       ? source.fallback_models.map((entry) => entry && typeof entry === 'object' ? { ...entry } : entry)
@@ -84,13 +102,10 @@
   function onSave() {
     if (!initialized) return setStatus('Form is not ready yet.', 'error');
     if (Object.keys(validationErrors).length > 0) return setStatus('Please fix the errors above before saving.', 'error');
-    postMessage({ command: 'save', payload: serializeValues() });
+    const target = currentTarget();
+    if (!target) return setStatus('Form is not ready yet.', 'error');
+    postMessage({ command: 'save', target, payload: serializeValues() });
     persist();
-  }
-
-  function onCreateProfile() {
-    if (!initialized) return setStatus('Form is not ready yet.', 'error');
-    postMessage({ command: 'createProfile' });
   }
 
   function onAddFallback() {
@@ -199,9 +214,8 @@
     const message = event?.data;
     if (!message || typeof message !== 'object') return;
     if (message.command === 'init') applyInit(message);
-    else if (message.command === 'saved') { setStatus('Saved.', 'success'); formDirty = false; persist(); }
-    else if (message.command === 'error') setStatus(message.message ? String(message.message) : 'Host reported an error', 'error');
-    else if (message.command === 'profileCreated') setStatus(`Profile "${message.name || ''}" created.`, 'success');
+    else if (message.command === 'saved' && matchesCurrentTarget(message.target)) { setStatus('Saved.', 'success'); setDirty(false); }
+    else if (message.command === 'error' && matchesCurrentTarget(message.target)) setStatus(message.message ? String(message.message) : 'Host reported an error', 'error');
     else if (message.command === 'modelsLoading') modelStatus = { message: 'Loading available models…', type: 'loading' };
     else if (message.command === 'modelsUnavailable') {
       const error = typeof message.error === 'string' && message.error.length > 0 ? message.error : 'the local opencode CLI is unavailable';
@@ -221,17 +235,18 @@
     if (persisted?.routing && persisted?.dirty) {
       entityKind = persisted.kind ?? null;
       entityName = persisted.name ?? null;
+      entityProfile = persisted.profile ?? null;
       routing = persisted.routing;
       formDirty = true;
       initialized = true;
-    } else if (persisted?.values) applyInit({ type: persisted.kind, name: persisted.name, config: persisted.values });
+    } else if (persisted?.values) applyInit({ type: persisted.kind, name: persisted.name, profile: persisted.profile, config: persisted.values });
     window.addEventListener('message', handleMessage);
     postMessage({ command: 'ready' });
     return () => window.removeEventListener('message', handleMessage);
   });
 </script>
 
-<svelte:window onkeydown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') onSave(); }} />
+<svelte:window onkeydown={(event) => { if ((event.metaKey || event.ctrlKey) && (event.key.toLowerCase() === 's' || event.key === 'Enter')) { event.preventDefault(); onSave(); } }} />
 
 <main class="editor" id="editor" aria-busy={!initialized}>
   <header class="editor__header">
@@ -271,6 +286,6 @@
     <button type="button" class="vscode-button vscode-button--secondary" id="btn-reload-models" title="Reload available models from the local opencode CLI" onclick={() => postMessage({ command: 'reloadModels' })}>Reload models</button>
     <div class="editor__status editor__status--{status.type}" id="status" role="status" aria-live="polite" hidden={!status.message}>{status.message}</div>
     <div class="editor__status" id="model-routing-status" role="status" aria-live="polite" hidden={!routingAnnouncement}>{routingAnnouncement}</div>
-    <div class="editor__actions"><button type="button" class="vscode-button vscode-button--secondary" id="btn-create-profile" onclick={onCreateProfile} disabled={!initialized}>Create Profile</button><button type="button" class="vscode-button vscode-button--primary" id="btn-save" onclick={onSave} disabled={!initialized}>Save</button></div>
+    <div class="editor__actions"><button type="button" class="vscode-button vscode-button--primary" id="btn-save" onclick={onSave} disabled={!initialized}>Save</button></div>
   </form>
 </main>

@@ -917,6 +917,7 @@ describe('AgentEditorPanel integration', () => {
       model: 'profile/model',
       prompt: 'from profile',
     });
+    expect(initMessage).toMatchObject({ profile: 'fast' });
     expect(profileStore.getProfileMock).toHaveBeenCalledWith('fast');
     expect(configStore.getAgentMock).not.toHaveBeenCalled();
   });
@@ -940,7 +941,11 @@ describe('AgentEditorPanel integration', () => {
     );
 
     for (const listener of listeners) {
-      listener({ command: 'save', payload: { model: 'profile/new', prompt: null } });
+      listener({
+        command: 'save',
+        target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+        payload: { model: 'profile/new', prompt: null },
+      });
     }
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -952,7 +957,157 @@ describe('AgentEditorPanel integration', () => {
       new Set(['prompt']),
     );
     expect(configStore.updateConfigMock).not.toHaveBeenCalled();
-    expect(messages).toContainEqual({ command: 'saved' });
+    expect(messages).toContainEqual({
+      command: 'saved',
+      target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    });
+  });
+
+  it('shows an unsaved title only for the current target and clears it after its save acknowledgement', async () => {
+    const { panel, listeners, messages } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    for (const listener of listeners) {
+      listener({
+        command: 'dirtyState',
+        target: { type: 'agent', name: 'sisyphus', profile: null },
+        dirty: true,
+      });
+    }
+    expect(panel.title).toBe('● Agent Model: sisyphus (unsaved)');
+
+    for (const listener of listeners) {
+      listener({
+        command: 'save',
+        target: { type: 'agent', name: 'sisyphus', profile: null },
+        payload: { model: 'new-model' },
+      });
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(panel.title).toBe('Agent Model: sisyphus');
+    expect(messages).toContainEqual({
+      command: 'saved',
+      target: { type: 'agent', name: 'sisyphus', profile: null },
+    });
+  });
+
+  it('ignores stale dirty and save messages, including a same-name different-profile target', async () => {
+    const { panel, listeners, messages } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    );
+
+    for (const listener of listeners) {
+      listener({
+        command: 'dirtyState',
+        target: { type: 'agent', name: 'sisyphus', profile: 'careful' },
+        dirty: true,
+      });
+      listener({
+        command: 'save',
+        target: { type: 'agent', name: 'sisyphus', profile: 'careful' },
+        payload: { model: 'stale-model' },
+      });
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(panel.title).toBe('Agent Model: sisyphus (profile: fast)');
+    expect(messages).not.toContainEqual({
+      command: 'saved',
+      target: { type: 'agent', name: 'sisyphus', profile: 'careful' },
+    });
+  });
+
+  it('resets the title before switching targets and ignores stale dirty state from the prior item', () => {
+    const { panel, listeners } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+    for (const listener of listeners) {
+      listener({
+        command: 'dirtyState',
+        target: { type: 'agent', name: 'sisyphus', profile: null },
+        dirty: true,
+      });
+    }
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'category', name: 'quick' },
+    );
+    for (const listener of listeners) {
+      listener({
+        command: 'dirtyState',
+        target: { type: 'agent', name: 'sisyphus', profile: null },
+        dirty: true,
+      });
+    }
+
+    expect(panel.title).toBe('Category Model: quick');
+  });
+
+  it('ignores the legacy createProfile command from the editor', async () => {
+    const { panel, listeners } = makeMockWebviewPanel();
+    const configStore = makeMockConfigStore();
+    const profileStore = makeMockProfileStore();
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+    for (const listener of listeners) {
+      listener({ command: 'createProfile' });
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(vscode.window.showInputBox)).not.toHaveBeenCalled();
   });
 
 });

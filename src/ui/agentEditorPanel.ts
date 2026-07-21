@@ -36,6 +36,12 @@ export type EditorItem =
   | { type: 'agent'; name: string; profile?: string }
   | { type: 'category'; name: string; profile?: string };
 
+type EditorTarget = {
+  readonly type: EditorItem['type'];
+  readonly name: string;
+  readonly profile: string | null;
+};
+
 // ---------------------------------------------------------------------------
 // Internal constants & helpers
 // ---------------------------------------------------------------------------
@@ -116,6 +122,45 @@ function getNullKeys(raw: unknown): Set<string> {
   return nullKeys;
 }
 
+function targetFor(item: EditorItem): EditorTarget {
+  return {
+    type: item.type,
+    name: item.name,
+    profile: item.profile ?? null,
+  };
+}
+
+function parseTarget(raw: unknown): EditorTarget | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const target = raw as {
+    type?: unknown;
+    name?: unknown;
+    profile?: unknown;
+  };
+  if (
+    (target.type !== 'agent' && target.type !== 'category') ||
+    typeof target.name !== 'string' ||
+    (target.profile !== undefined && target.profile !== null && typeof target.profile !== 'string')
+  ) {
+    return undefined;
+  }
+  return {
+    type: target.type,
+    name: target.name,
+    profile: target.profile ?? null,
+  };
+}
+
+function sameTarget(left: EditorTarget, right: EditorTarget): boolean {
+  return (
+    left.type === right.type &&
+    left.name === right.name &&
+    left.profile === right.profile
+  );
+}
+
 // ---------------------------------------------------------------------------
 // AgentEditorPanel
 // ---------------------------------------------------------------------------
@@ -134,6 +179,7 @@ export class AgentEditorPanel implements vscode.Disposable {
   private readonly _treeProvider: AgentModelTreeProvider;
   private readonly _extensionPath: string;
   private _item: EditorItem;
+  private _dirty = false;
   private readonly _disposables: vscode.Disposable[] = [];
 
   private constructor(
@@ -153,7 +199,7 @@ export class AgentEditorPanel implements vscode.Disposable {
     this._treeProvider = treeProvider;
     this._item = item;
 
-    this._panel.title = AgentEditorPanel._titleFor(item);
+    this._updateTitle();
     this._panel.webview.html = this._renderHtml();
 
     this._panel.onDidDispose(
@@ -241,10 +287,21 @@ export class AgentEditorPanel implements vscode.Disposable {
     return `${prefix}: ${item.name}${suffix}`;
   }
 
+  private _updateTitle(): void {
+    const baseTitle = AgentEditorPanel._titleFor(this._item);
+    this._panel.title = this._dirty ? `● ${baseTitle} (unsaved)` : baseTitle;
+  }
+
+  private _matchesCurrentTarget(rawTarget: unknown): boolean {
+    const target = parseTarget(rawTarget);
+    return target !== undefined && sameTarget(target, targetFor(this._item));
+  }
+
   /** Switch the panel to a different item and refresh the HTML. */
   private _switchItem(item: EditorItem): void {
+    this._dirty = false;
     this._item = item;
-    this._panel.title = AgentEditorPanel._titleFor(item);
+    this._updateTitle();
     this._panel.webview.html = this._renderHtml();
   }
 
@@ -297,6 +354,7 @@ export class AgentEditorPanel implements vscode.Disposable {
       command: 'init',
       type: item.type,
       name: item.name,
+      profile: item.profile ?? null,
       config: current ?? null,
       builtinAgents: [...BUILTIN_AGENTS],
       builtinCategories: [...BUILTIN_CATEGORIES],
@@ -377,11 +435,20 @@ export class AgentEditorPanel implements vscode.Disposable {
     }
     if (command === 'save') {
       const payload = (msg as { payload?: unknown }).payload;
-      await this._handleSave(payload);
+      const target = (msg as { target?: unknown }).target;
+      if (!this._matchesCurrentTarget(target)) {
+        return;
+      }
+      await this._handleSave(payload, parseTarget(target));
       return;
     }
-    if (command === 'createProfile') {
-      await this._handleCreateProfile();
+    if (command === 'dirtyState') {
+      const dirty = (msg as { dirty?: unknown }).dirty;
+      const target = (msg as { target?: unknown }).target;
+      if (typeof dirty === 'boolean' && this._matchesCurrentTarget(target)) {
+        this._dirty = dirty;
+        this._updateTitle();
+      }
       return;
     }
     if (command === 'reloadModels') {
@@ -391,8 +458,18 @@ export class AgentEditorPanel implements vscode.Disposable {
     // Unknown command: ignore silently.
   }
 
-  private async _handleSave(rawPayload: unknown): Promise<void> {
-    const item = this._item;
+  private async _handleSave(
+    rawPayload: unknown,
+    target: EditorTarget | undefined,
+  ): Promise<void> {
+    if (target === undefined) {
+      return;
+    }
+    const item: EditorItem = {
+      type: target.type,
+      name: target.name,
+      ...(target.profile === null ? {} : { profile: target.profile }),
+    };
     try {
       const nullKeys = getNullKeys(rawPayload);
 
@@ -476,55 +553,17 @@ export class AgentEditorPanel implements vscode.Disposable {
         }
       }
 
-      this._panel.webview.postMessage({ command: 'saved' });
+      if (sameTarget(target, targetFor(this._item))) {
+        this._dirty = false;
+        this._updateTitle();
+      }
+      this._panel.webview.postMessage({ command: 'saved', target });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Save failed';
       this._panel.webview.postMessage({
         command: 'error',
         message,
-      });
-    }
-  }
-
-  private async _handleCreateProfile(): Promise<void> {
-    const item = this._item;
-    const defaultName =
-      item.type === 'agent'
-        ? `agent-${item.name}`
-        : `category-${item.name}`;
-
-    const name = await vscode.window.showInputBox({
-      prompt: 'Name for the new profile',
-      value: defaultName,
-      validateInput: (v) =>
-        v.trim().length > 0 ? null : 'Profile name cannot be empty',
-    });
-    if (name === undefined) {
-      return; // user cancelled
-    }
-
-    const description = await vscode.window.showInputBox({
-      prompt: 'Optional description for the new profile',
-      placeHolder: 'Leave empty to skip',
-    });
-
-    try {
-      const profile = await this._profileStore.createProfile(
-        name.trim(),
-        description && description.trim().length > 0
-          ? description.trim()
-          : undefined,
-      );
-      this._panel.webview.postMessage({
-        command: 'profileCreated',
-        name: profile.name,
-      });
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to create profile';
-      this._panel.webview.postMessage({
-        command: 'error',
-        message,
+        target,
       });
     }
   }

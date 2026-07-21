@@ -148,10 +148,7 @@ describe('webview lazy model picker (end-to-end)', () => {
     // The init also enables the action buttons.
     const btnSave = document.getElementById('btn-save') as HTMLButtonElement;
     expect(btnSave.disabled).toBe(false);
-    const btnCreateProfile = document.getElementById(
-      'btn-create-profile',
-    ) as HTMLButtonElement;
-    expect(btnCreateProfile.disabled).toBe(false);
+    expect(document.getElementById('btn-create-profile')).toBeNull();
 
     // Sanity: the host should NOT have received a 'save' yet.
     expect(
@@ -488,8 +485,9 @@ describe('webview lazy model picker (end-to-end)', () => {
         message.command === 'save' &&
         'payload' in message,
     );
-    expect(saveMessage).toEqual({
+    expect(saveMessage).toMatchObject({
       command: 'save',
+      target: { type: 'agent', name: 'sisyphus', profile: null },
       payload: {
         model: 'promoted/model',
         variant: 'promoted-variant',
@@ -607,8 +605,9 @@ describe('webview lazy model picker (end-to-end)', () => {
         message.command === 'save' &&
         'payload' in message,
     );
-    expect(saveMessage).toEqual({
+    expect(saveMessage).toMatchObject({
       command: 'save',
+      target: { type: 'agent', name: 'sisyphus', profile: null },
       payload: {
         model: 'promoted/model',
         variant: 'promoted-variant',
@@ -982,5 +981,112 @@ describe('webview lazy model picker (end-to-end)', () => {
     await window.happyDOM.waitUntilComplete();
     const state = states.at(-1) as { dirty?: boolean };
     expect(state.dirty).toBe(true);
+  });
+
+  it('uses target-aware dirty and save messages, retaining dirty state until a matching acknowledgement', async () => {
+    const { window, messages, states } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      profile: 'fast',
+      config: { model: 'main' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const modelInput = window.document.getElementById('f-model') as HTMLInputElement;
+    modelInput.value = 'changed';
+    modelInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    expect(messages).toContainEqual({
+      command: 'dirtyState',
+      target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+      dirty: true,
+    });
+    expect((states.at(-1) as { profile?: string }).profile).toBe('fast');
+
+    window.postMessage({
+      command: 'saved',
+      target: { type: 'agent', name: 'sisyphus', profile: 'careful' },
+    });
+    await window.happyDOM.waitUntilComplete();
+    expect((states.at(-1) as { dirty?: boolean }).dirty).toBe(true);
+
+    window.postMessage({
+      command: 'error',
+      message: 'save failed',
+      target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    });
+    await window.happyDOM.waitUntilComplete();
+    expect((states.at(-1) as { dirty?: boolean }).dirty).toBe(true);
+
+    window.postMessage({
+      command: 'saved',
+      target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    });
+    await window.happyDOM.waitUntilComplete();
+    expect((states.at(-1) as { dirty?: boolean }).dirty).toBe(false);
+  });
+
+  it('discards restored dirty state when the same entity arrives for a different profile', async () => {
+    const { window, states } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      profile: 'fast',
+      config: { model: 'main' },
+    });
+    await window.happyDOM.waitUntilComplete();
+    const modelInput = window.document.getElementById('f-model') as HTMLInputElement;
+    modelInput.value = 'dirty-model';
+    modelInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    const restored = await createWebviewWindow(states.at(-1));
+    restored.window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      profile: 'careful',
+      config: { model: 'host-model' },
+    });
+    await restored.window.happyDOM.waitUntilComplete();
+
+    expect((restored.window.document.getElementById('f-model') as HTMLInputElement).value).toBe('host-model');
+    expect((restored.states.at(-1) as { dirty?: boolean }).dirty).toBe(false);
+    await restored.window.happyDOM.close();
+  });
+
+  it.each([
+    { ctrlKey: true, metaKey: false, key: 's' },
+    { ctrlKey: false, metaKey: true, key: 's' },
+    { ctrlKey: true, metaKey: false, key: 'Enter' },
+    { ctrlKey: false, metaKey: true, key: 'Enter' },
+  ])('saves exactly once and prevents the browser shortcut for %o', async (keys) => {
+    const { window, messages } = env;
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', profile: null, config: { model: 'main' } });
+    await window.happyDOM.waitUntilComplete();
+
+    const event = new window.KeyboardEvent('keydown', { ...keys, bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+    await window.happyDOM.waitUntilComplete();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(messages.filter((message) => typeof message === 'object' && message !== null && 'command' in message && message.command === 'save')).toHaveLength(1);
+  });
+
+  it('leaves plain s and Enter available to existing controls', async () => {
+    const { window, messages } = env;
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', profile: null, config: { model: 'main' } });
+    await window.happyDOM.waitUntilComplete();
+
+    for (const key of ['s', 'Enter']) {
+      const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(messages.filter((message) => typeof message === 'object' && message !== null && 'command' in message && message.command === 'save')).toHaveLength(0);
   });
 });
