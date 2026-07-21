@@ -108,7 +108,7 @@
         ondragend={onDragEnd}
         onkeydown={(event) => onKeydown(event, card.uid, index)}
       >Drag</button>
-      <span class="model-card__position" data-model-position={isMain ? 'main' : `fallback-${index}`}>{positionLabel}</span>
+      <span class="model-card__position" class:model-card__position--main={isMain} data-model-position={isMain ? 'main' : `fallback-${index}`}>{positionLabel}</span>
     </div>
     {#if !isMain}
       <button type="button" class="model-card__remove fallback-card__remove" onclick={() => onRemove(card.uid)}>Remove</button>

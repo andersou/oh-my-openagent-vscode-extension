@@ -12,7 +12,9 @@ html, body {
 
 .editor { max-width: 720px; margin: 0 auto; padding: 28px 32px 64px; }
 .editor__header { margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid var(--vscode-widget-border); }
-.editor__eyebrow, .editor__section-title, .model-card__position { margin: 0; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.editor__eyebrow, .editor__section-title { margin: 0; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.model-card__position { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.model-card__position--main { padding: 1px 6px; border-radius: 2px; color: var(--vscode-inputOption-activeForeground); background: var(--vscode-inputOption-activeBackground); }
 .editor__title { margin: 0 0 4px; color: var(--vscode-foreground); font-size: 20px; font-weight: 600; line-height: 1.25; }
 .editor__subtitle { margin: 0; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
 .editor__form { display: flex; flex-direction: column; gap: 16px; }
