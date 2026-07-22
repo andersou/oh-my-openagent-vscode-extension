@@ -43,6 +43,11 @@ export interface ThinkingConfig {
   budgetTokens?: number;
 }
 
+export interface ModelVariantConfig {
+  model?: string;
+  variant?: string;
+}
+
 export interface FallbackModelConfig {
   model: string;
   variant?: string;
@@ -60,9 +65,11 @@ export type ToolConfig = Record<string, boolean>;
 export type ProviderOptions = Record<string, unknown>;
 
 export interface PermissionConfig {
+  [tool: string]: Permission | Record<string, Permission> | undefined;
   edit?: Permission;
   bash?: Permission | Record<string, Permission>;
   webfetch?: Permission;
+  task?: Permission;
   doom_loop?: Permission;
   external_directory?: Permission;
 }
@@ -79,14 +86,19 @@ export interface AgentConfig {
   thinking?: ThinkingConfig;
   prompt?: string;
   prompt_append?: string;
+  skills?: string[];
   tools?: ToolConfig;
   disable?: boolean;
+  description?: string;
   permission?: PermissionConfig;
   category?: string;
   mode?: AgentMode;
   color?: string;
+  displayName?: string;
   textVerbosity?: TextVerbosity;
   providerOptions?: ProviderOptions;
+  ultrawork?: ModelVariantConfig;
+  compaction?: ModelVariantConfig;
 }
 
 export interface CategoryConfig {
