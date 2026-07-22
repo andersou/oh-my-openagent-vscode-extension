@@ -7,6 +7,8 @@ import {
   type ParseOptions,
 } from 'jsonc-parser';
 
+export * from './profileTransferSerialization.js';
+
 export const MAX_PROFILE_TRANSFER_BYTES = 5 * 1024 * 1024;
 
 export interface UnvalidatedJsonObject {
