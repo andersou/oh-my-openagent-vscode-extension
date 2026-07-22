@@ -1,13 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type {
-  AgentConfig,
-  CategoryConfig,
-  Profile,
-  ProfilesFile,
-} from './schema.js';
+import type { AgentConfig, Profile, ProfilesFile } from './schema.js';
 
 type IsAssignable<Source, Target> = Source extends Target ? true : false;
+
+type ExpectedProfileRootKey =
+  | 'name'
+  | 'description'
+  | 'agents'
+  | 'categories'
+  | 'createdAt'
+  | 'updatedAt';
+type ExpectedProfilesFileRootKey =
+  | 'profiles'
+  | 'lastActiveProfile'
+  | 'version';
 
 // Pinned upstream contract: 9c81de52a18f5787154debe0e3cdf0ab465da2ff
 // https://github.com/code-yeongyu/oh-my-openagent/blob/9c81de52a18f5787154debe0e3cdf0ab465da2ff/assets/oh-my-opencode.schema.json
@@ -28,84 +35,63 @@ const UPSTREAM_PROFILE_AGENT = {
   },
 } satisfies AgentConfig;
 
-const INVALID_SKILLS = { skills: [42] } as const;
+const INVALID_SKILLS: { skills: number[] } = { skills: [42] };
 const INVALID_TASK_PERMISSION = {
   permission: { task: 'sometimes' },
 } as const;
 const INVALID_ULTRAWORK_MODEL = { ultrawork: { model: 42 } } as const;
 
-const INVALID_FIXTURES_ARE_REJECTED = [
-  false satisfies IsAssignable<typeof INVALID_SKILLS, AgentConfig>,
-  false satisfies IsAssignable<typeof INVALID_TASK_PERMISSION, AgentConfig>,
-  false satisfies IsAssignable<typeof INVALID_ULTRAWORK_MODEL, AgentConfig>,
-] as const;
+const PROFILE_SECTIONS = {
+  agents: { sisyphus: UPSTREAM_PROFILE_AGENT },
+  categories: {
+    deep: {
+      model: 'openai/gpt-5.4',
+      main_overrides: { reasoningEffort: 'high' },
+    },
+  },
+} satisfies Pick<Profile, 'agents' | 'categories'>;
 
 describe('profile schema contract', () => {
-  it('keeps local profiles scoped to metadata, agents, and categories', () => {
-    // Given
-    const category = {
-      model: 'openai/gpt-5.4',
-      main_overrides: { variant: 'high' },
-    } satisfies CategoryConfig;
-    const profile = {
-      name: 'portable-profile',
-      description: 'Profile metadata',
-      agents: { sisyphus: { model: 'openai/gpt-5.4' } },
-      categories: { deep: category },
-      createdAt: '2026-07-22T00:00:00.000Z',
-      updatedAt: '2026-07-22T00:00:00.000Z',
-    } satisfies Profile;
-    const profilesFile = {
-      profiles: [profile],
-      lastActiveProfile: profile.name,
-      version: 1,
-    } satisfies ProfilesFile;
+  it('pins exact Profile root keys at compile time', () => {
+    expectTypeOf<keyof Profile>().toEqualTypeOf<ExpectedProfileRootKey>();
+  });
 
-    // When
-    const roundTrip = JSON.parse(JSON.stringify(profilesFile));
+  it('pins exact ProfilesFile root keys at compile time', () => {
+    expectTypeOf<keyof ProfilesFile>().toEqualTypeOf<ExpectedProfilesFileRootKey>();
+  });
 
-    // Then
-    expect(Object.keys(roundTrip)).toEqual([
-      'profiles',
-      'lastActiveProfile',
-      'version',
-    ]);
-    expect(Object.keys(roundTrip.profiles[0])).toEqual([
-      'name',
-      'description',
-      'agents',
-      'categories',
-      'createdAt',
-      'updatedAt',
-    ]);
-    expect(roundTrip.profiles[0].categories.deep.main_overrides).toEqual({
-      variant: 'high',
-    });
-    expect(roundTrip.profiles[0]).not.toHaveProperty('agent_order');
-    expect(roundTrip.profiles[0]).not.toHaveProperty('disabled_agents');
+  it('rejects mutable numeric skills by element type at compile time', () => {
+    expectTypeOf<
+      NonNullable<AgentConfig['skills']>[number]
+    >().toEqualTypeOf<string>();
+    expectTypeOf<
+      IsAssignable<typeof INVALID_SKILLS, Pick<AgentConfig, 'skills'>>
+    >().toEqualTypeOf<false>();
+    expectTypeOf<
+      IsAssignable<
+        typeof INVALID_TASK_PERMISSION,
+        Pick<AgentConfig, 'permission'>
+      >
+    >().toEqualTypeOf<false>();
+    expectTypeOf<
+      IsAssignable<
+        typeof INVALID_ULTRAWORK_MODEL,
+        Pick<AgentConfig, 'ultrawork'>
+      >
+    >().toEqualTypeOf<false>();
   });
 
   it('serializes the pinned upstream agent subset inside profile sections', () => {
     // Given
-    const profileSections = {
-      agents: { sisyphus: UPSTREAM_PROFILE_AGENT },
-      categories: {
-        deep: {
-          model: 'openai/gpt-5.4',
-          main_overrides: { reasoningEffort: 'high' },
-        },
-      },
-    } satisfies Pick<Profile, 'agents' | 'categories'>;
+    const expectedAgent = UPSTREAM_PROFILE_AGENT;
 
     // When
-    const roundTrip = JSON.parse(JSON.stringify(profileSections));
+    const roundTrip = JSON.parse(JSON.stringify(PROFILE_SECTIONS));
 
     // Then
-    expect(roundTrip).toEqual(profileSections);
-    expect(Object.keys(roundTrip)).toEqual(['agents', 'categories']);
-  });
-
-  it('rejects invalid pinned upstream agent fixtures at compile time', () => {
-    expect(INVALID_FIXTURES_ARE_REJECTED).toEqual([false, false, false]);
+    expect(roundTrip.agents.sisyphus).toEqual(expectedAgent);
+    expect(roundTrip.categories.deep.main_overrides).toEqual({
+      reasoningEffort: 'high',
+    });
   });
 });
