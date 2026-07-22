@@ -5,8 +5,11 @@ import {
   cloneProfilesFile,
   containsProviderOptions,
   deriveProfileNameFromSource,
+  exportFilenameCollisionKey,
   exportProfileFragment,
   parseProfileTransfer,
+  ProfileTransferSerializationError,
+  resolveExportBasenameCollisions,
   resolveProfileNameCollisions,
   sanitizeExportBasename,
   serializeProfileTransfer,
@@ -15,6 +18,17 @@ import { validateProfileTransfer, type ProfileFragment } from './profileValidati
 import type { Profile } from './schema.js';
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+function expectSerializationFailure(value: unknown): void {
+  try {
+    serializeProfileTransfer(value);
+  } catch (error: unknown) {
+    if (!(error instanceof ProfileTransferSerializationError)) throw error;
+    expect(error).toMatchObject({ code: 'unsupported_json_value' });
+    return;
+  }
+  throw new TypeError('serialization unexpectedly succeeded');
+}
 
 describe('profile transfer serialization', () => {
   it('serializes normalized fragments as two-space JSON with one trailing newline', () => {
@@ -26,6 +40,49 @@ describe('profile transfer serialization', () => {
     expect(serializeProfileTransfer(fragment)).toBe(
       '{\n  "agents": {\n    "sisyphus": {\n      "model": "openai/gpt-5.6"\n    }\n  },\n  "categories": {\n    "deep": {\n      "reasoningEffort": "high"\n    }\n  }\n}\n',
     );
+  });
+
+  it('canonicalizes semantically equal object values regardless of insertion order', () => {
+    const first = {
+      z: [{ b: 2, a: 1 }, 3],
+      a: { y: true, x: null },
+    };
+    const second = {
+      a: { x: null, y: true },
+      z: [{ a: 1, b: 2 }, 3],
+    };
+
+    expect(serializeProfileTransfer(first)).toBe(serializeProfileTransfer(second));
+    expect(serializeProfileTransfer({ values: [2, 1] })).toContain(
+      '"values": [\n    2,\n    1\n  ]',
+    );
+  });
+
+  it.each([
+    { label: 'undefined', value: undefined },
+    { label: 'function', value: () => undefined },
+    { label: 'symbol', value: Symbol('unsupported') },
+    { label: 'bigint', value: 1n },
+    { label: 'infinity', value: Infinity },
+    { label: 'not a number', value: Number.NaN },
+    { label: 'nested undefined', value: { section: { value: undefined } } },
+  ])('rejects unsupported $label values with a typed error', ({ value }) => {
+    expectSerializationFailure(value);
+  });
+
+  it('rejects cycles and accessor-bearing values before serialization', () => {
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+    const accessorValue = {};
+    Object.defineProperty(accessorValue, 'value', {
+      enumerable: true,
+      get: () => {
+        throw new TypeError('accessor must not run');
+      },
+    });
+
+    expectSerializationFailure(cyclic);
+    expectSerializationFailure(accessorValue);
   });
 
   it('round-trips supported agent and category values through parser and validator', () => {
@@ -101,6 +158,9 @@ describe('profile transfer serialization', () => {
     { sourceName: 'Focus.PROFILE.JSON', expected: 'Focus' },
     { sourceName: 'Focus.jsonc', expected: 'Focus' },
     { sourceName: ' Focus.json ', expected: 'Focus' },
+    { sourceName: '/exports/Focus.profile.jsonc', expected: 'Focus' },
+    { sourceName: 'C:\\exports\\Focus.profile.json', expected: 'Focus' },
+    { sourceName: '/exports/e\u0301.json', expected: 'é' },
     { sourceName: '  猫 profile.jsonc  ', expected: '猫 profile' },
     { sourceName: ' .PROFILE.JSONC ', expected: 'imported-profile' },
   ])('derives $expected from $sourceName', ({ sourceName, expected }) => {
@@ -131,6 +191,20 @@ describe('profile transfer serialization', () => {
     expect(sanitizeExportBasename(name)).toBe(expected);
   });
 
+  it('allocates filesystem export basenames with normalized case and Unicode collision keys', () => {
+    expect(
+      resolveExportBasenameCollisions([], [
+        'Road/map',
+        'road\\map',
+        'e\u0301',
+        'É',
+      ]),
+    ).toEqual(['Road-map', 'road-map-2', 'é', 'É-2']);
+    expect(exportFilenameCollisionKey('Road/map')).toBe(
+      exportFilenameCollisionKey('road\\map'),
+    );
+  });
+
   it('detects only own non-empty providerOptions without reading option values', () => {
     const opaqueOptions: Record<string, unknown> = {};
     Object.defineProperty(opaqueOptions, 'secret', {
@@ -143,6 +217,8 @@ describe('profile transfer serialization', () => {
     Object.defineProperty(AgentWithInheritedProviderOptions.prototype, 'providerOptions', {
       value: { inherited: true },
     });
+    const arrayProviderOptions = {};
+    Object.defineProperty(arrayProviderOptions, 'providerOptions', { value: [] });
     const fragment: ProfileFragment = {
       agents: {
         empty: { providerOptions: {} },
@@ -153,7 +229,23 @@ describe('profile transfer serialization', () => {
 
     expect(containsProviderOptions({ agents: { empty: {} } })).toBe(false);
     expect(containsProviderOptions({ agents: { empty: { providerOptions: {} } } })).toBe(false);
+    expect(containsProviderOptions({ agents: { array: arrayProviderOptions } })).toBe(false);
     expect(containsProviderOptions({ agents: { inherited: fragment.agents?.inherited ?? {} } })).toBe(false);
     expect(containsProviderOptions(fragment)).toBe(true);
+  });
+
+  it('treats own providerOptions accessors as absent without invoking them', () => {
+    const agent = {};
+    let getterInvoked = false;
+    Object.defineProperty(agent, 'providerOptions', {
+      enumerable: true,
+      get: () => {
+        getterInvoked = true;
+        throw new TypeError('providerOptions getter must not run');
+      },
+    });
+
+    expect(containsProviderOptions({ agents: { guarded: agent } })).toBe(false);
+    expect(getterInvoked).toBe(false);
   });
 });
