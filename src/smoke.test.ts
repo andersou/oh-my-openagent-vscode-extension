@@ -219,4 +219,47 @@ describe('smoke: end-to-end editor flow', () => {
     configStore.dispose();
   });
 
+  it('keeps an active profile clean after saving its agent from the editor', async () => {
+    // Given: a live config that diverged from its active profile before an editor save
+    const configStore = new ConfigStore(tmpDir);
+    const profileStore = new ProfileStore(configStore);
+    await profileStore.createProfile('fast');
+    await profileStore.activateProfile('fast');
+    await configStore.updateConfig((draft) => {
+      const agent = draft.agents?.sisyphus;
+      if (agent) {
+        agent.permission = { edit: 'ask' };
+      }
+    });
+    const modelDiscovery = new ModelDiscovery(stubExecutor([]) as never, extensionPath);
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    const { panel, sendToWebview } = makeMockWebviewPanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    );
+
+    // When: the active profile's agent is saved through the editor
+    sendToWebview('save', {
+      target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+      payload: { model: 'new/model' },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Then: the profile sidecar snapshots the JSONC config and is no longer dirty
+    expect(profileStore.getProfile('fast')?.agents?.sisyphus).toEqual({
+      model: 'new/model',
+      permission: { edit: 'ask' },
+    });
+    expect(profileStore.isActiveProfileModified()).toBe(false);
+
+    configStore.dispose();
+  });
+
 });

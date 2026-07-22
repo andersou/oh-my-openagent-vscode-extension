@@ -500,6 +500,7 @@ export class AgentEditorPanel implements vscode.Disposable {
                 delete (draft.agents[agentName] as Record<string, unknown>)[key];
               }
             });
+            await this._profileStore.saveActiveConfigToProfile();
           }
         } else {
           await this._configStore.updateConfig((draft) => {
@@ -538,6 +539,7 @@ export class AgentEditorPanel implements vscode.Disposable {
                 delete (draft.categories[categoryName] as Record<string, unknown>)[key];
               }
             });
+            await this._profileStore.saveActiveConfigToProfile();
           }
         } else {
           await this._configStore.updateConfig((draft) => {
