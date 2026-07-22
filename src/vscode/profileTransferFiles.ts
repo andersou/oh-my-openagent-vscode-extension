@@ -52,7 +52,6 @@ export async function openTransferFile(
       canSelectMany: false,
     });
   } catch (cause) {
-    if (!(cause instanceof Error)) throw cause;
     return {
       status: 'error',
       error: new ProfileTransferFileError('open-dialog', undefined, cause),
@@ -78,7 +77,6 @@ export async function openTransferFile(
     const bytes = await vscode.workspace.fs.readFile(uri);
     return { status: 'success', value: { uri, bytes } };
   } catch (cause) {
-    if (!(cause instanceof Error)) throw cause;
     return {
       status: 'error',
       error: new ProfileTransferFileError('read', uri, cause),
@@ -94,7 +92,6 @@ export async function saveTransferFile(
   try {
     target = await vscode.window.showSaveDialog(options);
   } catch (cause) {
-    if (!(cause instanceof Error)) throw cause;
     return {
       status: 'error',
       error: new ProfileTransferFileError('save-dialog', undefined, cause),
@@ -114,7 +111,6 @@ export async function saveTransferFile(
   try {
     await vscode.workspace.fs.writeFile(temporaryUri, bytes);
   } catch (cause) {
-    if (!(cause instanceof Error)) throw cause;
     await deleteTemporaryUri(temporaryUri);
     return {
       status: 'error',
@@ -125,7 +121,6 @@ export async function saveTransferFile(
   try {
     await vscode.workspace.fs.rename(temporaryUri, target, { overwrite: true });
   } catch (cause) {
-    if (!(cause instanceof Error)) throw cause;
     await deleteTemporaryUri(temporaryUri);
     return {
       status: 'error',
