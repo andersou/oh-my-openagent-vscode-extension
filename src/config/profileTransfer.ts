@@ -82,6 +82,33 @@ function isJsonObject(value: unknown): value is UnvalidatedJsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function getParseErrorLocation(
+  text: string,
+  parseError: ParseError,
+): SourceLocation {
+  let location: SourceLocation | undefined;
+
+  visit(
+    text,
+    {
+      onError: (error, offset, _length, startLine, startCharacter) => {
+        if (error === parseError.error && offset === parseError.offset) {
+          location = {
+            line: startLine + 1,
+            column: startCharacter + 1,
+          };
+        }
+      },
+    },
+    JSONC_OPTIONS,
+  );
+
+  if (location === undefined) {
+    throw new RangeError('jsonc-parser omitted coordinates for its parse error');
+  }
+  return location;
+}
+
 function scanProperties(text: string): PropertyScan {
   const objectKeys: Array<Set<string>> = [];
   const rootProperties = new Map<string, SourceLocation>();
@@ -172,15 +199,15 @@ export function parseProfileTransfer(
   const firstParseError = parseErrors[0];
 
   if (firstParseError !== undefined) {
-    const precedingText = text.slice(0, firstParseError.offset);
+    const location = getParseErrorLocation(text, firstParseError);
     return {
       ok: false,
       error: {
         code: 'syntax_error',
         message: `Invalid JSONC: ${printParseErrorCode(firstParseError.error)}`,
         path: [...getLocation(text, firstParseError.offset).path],
-        line: precedingText.split('\n').length,
-        column: firstParseError.offset - precedingText.lastIndexOf('\n'),
+        line: location.line,
+        column: location.column,
       },
     };
   }

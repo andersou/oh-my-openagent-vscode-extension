@@ -213,6 +213,26 @@ describe('profile transfer parsing', () => {
     expect(result).not.toHaveProperty('root');
   });
 
+  it('reports bare-CR syntax errors with parser coordinates', () => {
+    // Given
+    const input = encode('{\r"agents":\r}');
+
+    // When
+    const result = parseProfileTransfer(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'syntax_error',
+        path: ['agents'],
+        line: 3,
+        column: 1,
+      },
+    });
+    expect(result).not.toHaveProperty('root');
+  });
+
   it('rejects duplicate keys at the duplicate property location', () => {
     // Given
     const input = encode(`{
