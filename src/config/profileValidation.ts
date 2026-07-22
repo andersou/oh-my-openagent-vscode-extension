@@ -1,9 +1,13 @@
 import {
-  ProfileValidationFault,
   agentConfig,
-  assertEditorPayload,
   categoryConfig,
   configMap,
+} from './profileEntryValidation.js';
+import {
+  assertEditorPayload,
+} from './profileModelValidation.js';
+import {
+  ProfileValidationFault,
   fail,
   isPlainObject,
   knownKeys,
@@ -12,11 +16,11 @@ import {
   stringValue,
   type ProfileValidationErrorCode,
   type ValidationPath,
-} from './profileEntryValidation.js';
+} from './profileValidationPrimitives.js';
 import type { ProfileTransferRoot } from './profileTransfer.js';
 import type { AgentConfig, CategoryConfig, Profile } from './schema.js';
 
-export type { ProfileValidationErrorCode } from './profileEntryValidation.js';
+export type { ProfileValidationErrorCode } from './profileValidationPrimitives.js';
 
 export interface ProfileValidationError {
   readonly code: ProfileValidationErrorCode;

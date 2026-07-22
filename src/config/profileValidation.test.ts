@@ -162,6 +162,114 @@ describe('profile runtime validation', () => {
 
   it.each([
     {
+      label: 'agent root',
+      config: { maxTokens: 1.5 },
+    },
+    {
+      label: 'fallback entry',
+      config: {
+        fallback_models: [{ model: 'valid/model', maxTokens: 2.5 }],
+      },
+    },
+    {
+      label: 'main overrides',
+      config: { main_overrides: { maxTokens: 3.5 } },
+    },
+  ])('accepts decimal maxTokens in an $label', ({ config }) => {
+    // When
+    const result = validateProfileFragment({ agents: { a: config } });
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { agents: { a: config } },
+    });
+  });
+
+  it.each([
+    {
+      label: 'agent root',
+      config: { thinking: { type: 'enabled', budgetTokens: 1.5 } },
+    },
+    {
+      label: 'fallback entry',
+      config: {
+        fallback_models: [
+          {
+            model: 'valid/model',
+            thinking: { type: 'enabled', budgetTokens: 2.5 },
+          },
+        ],
+      },
+    },
+    {
+      label: 'main overrides',
+      config: {
+        main_overrides: {
+          thinking: { type: 'enabled', budgetTokens: 3.5 },
+        },
+      },
+    },
+  ])('accepts decimal thinking budgets in an $label', ({ config }) => {
+    // When
+    const result = validateProfileFragment({ agents: { a: config } });
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { agents: { a: config } },
+    });
+  });
+
+  it.each([
+    {
+      label: 'agent root',
+      config: { thinking: { type: 'enabled' } },
+    },
+    {
+      label: 'fallback entry',
+      config: {
+        fallback_models: [
+          { model: 'valid/model', thinking: { type: 'enabled' } },
+        ],
+      },
+    },
+    {
+      label: 'main overrides',
+      config: { main_overrides: { thinking: { type: 'enabled' } } },
+    },
+  ])('accepts enabled thinking without a budget in an $label', ({ config }) => {
+    // When
+    const result = validateProfileFragment({ agents: { a: config } });
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { agents: { a: config } },
+    });
+  });
+
+  it('accepts direct permission extensions and nested bash permissions', () => {
+    // Given
+    const permission = {
+      custom_tool: 'allow',
+      bash: { '*': 'ask', 'git status': 'allow' },
+    };
+
+    // When
+    const result = validateProfileFragment({
+      agents: { a: { permission } },
+    });
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { agents: { a: { permission } } },
+    });
+  });
+
+  it.each([
+    {
       label: 'unknown agent field',
       input: { agents: { custom: { invented: true } } },
       code: 'unknown_field',
@@ -202,6 +310,24 @@ describe('profile runtime validation', () => {
       path: ['agents', 'custom', 'temperature'],
     },
     {
+      label: 'non-finite maxTokens',
+      input: { agents: { custom: { maxTokens: Number.NaN } } },
+      code: 'invalid_value',
+      path: ['agents', 'custom', 'maxTokens'],
+    },
+    {
+      label: 'non-finite thinking budget',
+      input: {
+        agents: {
+          custom: {
+            thinking: { type: 'enabled', budgetTokens: Number.POSITIVE_INFINITY },
+          },
+        },
+      },
+      code: 'invalid_value',
+      path: ['agents', 'custom', 'thinking', 'budgetTokens'],
+    },
+    {
       label: 'invalid agent mode',
       input: { agents: { custom: { mode: 'worker' } } },
       code: 'invalid_value',
@@ -234,6 +360,26 @@ describe('profile runtime validation', () => {
       input: { agents: { custom: { permission: { custom_tool: 'sometimes' } } } },
       code: 'invalid_value',
       path: ['agents', 'custom', 'permission', 'custom_tool'],
+    },
+    {
+      label: 'non-hex agent color',
+      input: { agents: { a: { color: 'blue' } } },
+      code: 'invalid_value',
+      path: ['agents', 'a', 'color'],
+    },
+    {
+      label: 'nested edit permission map',
+      input: { agents: { a: { permission: { edit: { '*': 'allow' } } } } },
+      code: 'invalid_type',
+      path: ['agents', 'a', 'permission', 'edit'],
+    },
+    {
+      label: 'nested extension permission map',
+      input: {
+        agents: { a: { permission: { custom_tool: { '*': 'allow' } } } },
+      },
+      code: 'invalid_type',
+      path: ['agents', 'a', 'permission', 'custom_tool'],
     },
     {
       label: 'missing fragment sections',

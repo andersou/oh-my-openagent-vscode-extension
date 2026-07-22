@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('vscode', () => ({}));
 
 import { AGENT_FIELDS, CATEGORY_FIELDS } from './agentEditorPanel.js';
+import { validateAndClean } from './editorPayloadValidation.js';
 
 describe('structured editor allow-lists', () => {
   it('pins the agent fields accepted before payload validation', () => {
@@ -62,5 +63,36 @@ describe('structured editor allow-lists', () => {
 
     // Then
     expect(actual).toEqual(expected);
+  });
+
+  it('preserves legacy free-form color validation', () => {
+    // When
+    const color = validateAndClean<{ readonly color: string }>(
+      { color: 'blue' },
+      AGENT_FIELDS,
+    );
+
+    // Then
+    expect(color).toEqual({ color: 'blue' });
+  });
+
+  it('preserves legacy integer maxTokens validation', () => {
+    // When / Then
+    expect(() =>
+      validateAndClean<Record<string, unknown>>(
+        { maxTokens: 1.5 },
+        AGENT_FIELDS,
+      ),
+    ).toThrow('Invalid maxTokens: must be a positive integer');
+  });
+
+  it('preserves the legacy required enabled-thinking budget', () => {
+    // When / Then
+    expect(() =>
+      validateAndClean<Record<string, unknown>>(
+        { thinking: { type: 'enabled' } },
+        AGENT_FIELDS,
+      ),
+    ).toThrow('Invalid thinking.budgetTokens: must be a positive integer');
   });
 });
