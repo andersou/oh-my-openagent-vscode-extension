@@ -3,7 +3,6 @@
 // command surface remains easy to test in isolation.
 
 import * as vscode from 'vscode';
-
 import type { ConfigStore } from './config/configStore.js';
 import type { ProfileStore } from './config/profileStore.js';
 import {
@@ -14,7 +13,8 @@ import {
   validateProfileTransfer,
 } from './config/profileTransfer.js';
 import { AgentEditorPanel } from './ui/agentEditorPanel.js';
-import type { AgentModelTreeItem } from './ui/agentModelTreeProvider.js';
+import type { AgentModelTreeProvider, AgentModelTreeItem } from './ui/agentModelTreeProvider.js';
+import type { ModelDiscovery } from './opencode/modelDiscovery.js';
 import {
   openTransferFile,
   saveTransferFile,
@@ -42,14 +42,24 @@ export {
  * `commands.ts` passes this into `registerProfileTransferCommands(...)`.
  */
 export function createProfileTransferCommandContext(
+  context: vscode.ExtensionContext,
   configStore: ConfigStore,
   profileStore: ProfileStore,
+  modelDiscovery: ModelDiscovery,
+  treeProvider: AgentModelTreeProvider,
 ): ProfileTransferCommandContext {
   return {
     configStore,
     profileStore,
     showProfileJson: (profileName?: string) => {
-      AgentEditorPanel.showProfileJson(configStore, profileStore, profileName);
+      AgentEditorPanel.showProfileJson(
+        context,
+        configStore,
+        profileStore,
+        modelDiscovery,
+        treeProvider,
+        profileName,
+      );
     },
     openTransferFile,
     saveTransferFile,

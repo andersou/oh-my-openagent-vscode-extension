@@ -309,7 +309,7 @@ export function registerCommands(
 ];
 
 const profileTransferCommands = registerProfileTransferCommands(
-  createProfileTransferCommandContext(configStore, profileStore),
+  createProfileTransferCommandContext(context, configStore, profileStore, modelDiscovery, treeProvider),
 );
 
 return vscode.Disposable.from(...commands, profileTransferCommands);

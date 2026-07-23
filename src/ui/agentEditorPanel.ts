@@ -24,7 +24,6 @@ import { BUILTIN_AGENTS, BUILTIN_CATEGORIES } from '../config/schema.js';
 import type { ModelDiscovery } from '../opencode/modelDiscovery.js';
 import type { AgentModelTreeProvider } from './agentModelTreeProvider.js';
 import { validateAndClean } from './editorPayloadValidation.js';
-import { serializeProfileTransfer } from '../config/profileTransferSerialization.js';
 import {
   getProfileJsonInitText,
   parseProfileJsonTarget,
@@ -307,44 +306,22 @@ export class AgentEditorPanel implements vscode.Disposable {
   }
 
   /**
-   * Open a read-only JSON editor for a saved profile (when `profileName` is
-   * given) or the active config's profile fragment (when omitted). This is the
-   * host-side contract the transfer commands use; Todo 10 may replace the text
-   * editor implementation with a dedicated webview panel without changing the
-   * command handlers.
+   * Open the profile JSON editor for a saved profile (when `profileName` is
+   * given) or the active config's profile fragment (when omitted).
    */
   public static showProfileJson(
+    context: vscode.ExtensionContext,
     configStore: ConfigStore,
     profileStore: ProfileStore,
+    modelDiscovery: ModelDiscovery,
+    treeProvider: AgentModelTreeProvider,
     profileName?: string,
   ): void {
-    const fragment =
-      profileName !== undefined
-        ? profileStore.getProfileFragment(profileName)
-        : {
-            agents: configStore.getConfig().agents,
-            categories: configStore.getConfig().categories,
-          };
-
-    const content = serializeProfileTransfer(fragment);
-    const title = profileName
-      ? `${profileName}.profile.json`
-      : 'active-config.profile.json';
-
-    void (async () => {
-      try {
-        const document = await vscode.workspace.openTextDocument({
-          content,
-          language: 'json',
-        });
-        await vscode.window.showTextDocument(document, { preview: false });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(
-          `Failed to open profile JSON: ${message}`,
-        );
-      }
-    })();
+    AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, treeProvider, {
+      type: 'profileJson',
+      source: profileName !== undefined ? 'saved' : 'active',
+      ...(profileName !== undefined ? { profile: profileName } : {}),
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -558,7 +535,7 @@ export class AgentEditorPanel implements vscode.Disposable {
       if (!this._matchesCurrentTarget(target)) {
         return;
       }
-      await this._handleSave(payload, parseAgentCategoryTarget(target));
+      await this._handleSave(payload, parseAgentCategoryTarget(target), target);
       return;
     }
     if (command === 'dirtyState') {
@@ -629,6 +606,7 @@ export class AgentEditorPanel implements vscode.Disposable {
   private async _handleSave(
     rawPayload: unknown,
     target: VersionedTarget | undefined,
+    rawTarget: unknown,
   ): Promise<void> {
     if (target === undefined || target.type === 'profileJson') {
       return;
@@ -726,13 +704,13 @@ export class AgentEditorPanel implements vscode.Disposable {
       if (sameVersionedTarget(target, this._versionedTarget)) {
         this._setDirty(false);
       }
-      this._panel.webview.postMessage({ command: 'saved', target });
+      this._panel.webview.postMessage({ command: 'saved', target: rawTarget });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Save failed';
       this._panel.webview.postMessage({
         command: 'error',
         message,
-        target,
+        target: rawTarget,
       });
     }
   }
