@@ -20,8 +20,10 @@ The sidebar view shows your active config, all built-in agents and categories wi
 - **Lazy model picker** — the Model field is populated asynchronously from the local `opencode models --verbose` CLI, with a free-form fallback when the CLI is unavailable. The discovered model IDs appear as autocomplete suggestions alongside each model's capabilities and variants. A reload button lets you re-run discovery at any time.
 - **JSONC preservation** — all writes go through `jsonc-parser` via a per-path diff engine. The `ConfigStore` compares the original and modified config recursively, then calls `modify()` on each changed JSON path individually. Comments, trailing commas, and formatting on untouched keys survive every edit.
 - **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`oh-my-openagent.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
+- **Profile import and export** — move individual profiles or your whole sidecar in and out as JSON or JSONC. Import a single `{ agents, categories }` fragment, or import a full `{ version: 1, profiles: [...] }` sidecar and choose whether to extend the existing list or replace it. Export one profile or every profile at once.
+- **JSON profile editing** — open a saved profile or the active config's `agents`/`categories` as JSON in an untitled editor, edit freely, and save to apply. Useful for bulk changes that the form editor does not expose.
 - **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away. Three collapsible groups (Agents, Categories, Profiles) with inline edit buttons, context menu actions, and tooltips that show configured parameters on hover.
-- **Commands where they belong**: `Open Agent Manager`, `Refresh`, and `Create Profile` are available from the Command Palette. Editing, override management, profile actions, and saving an active profile appear only when their sidebar context applies.
+- **Commands where they belong**: `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are available from the Command Palette and view title. Editing, override management, profile actions, and JSON editing appear only when their sidebar context applies.
 
 ## Requirements
 
@@ -111,15 +113,16 @@ Right-click items in the Models view for more options:
 - On a built-in agent: `Edit Agent` opens the editor. Saving creates the agent override.
 - On a built-in category: `Edit Category` opens the editor. Saving creates the category override.
 - On an override item: `Edit Agent` / `Edit Category` opens the editor, and `Remove Override` deletes that override from the active config.
-- On a profile: `Activate`, `Rename`, `Duplicate`, or `Delete`.
+- On a profile: `Activate`, `Rename`, `Duplicate`, `Delete`, `Export Profile`, or `Edit Profile JSON`.
 - Profile-contained agent/category leaves reuse the same `Edit Agent` / `Edit Category` commands as the main tree.
 - On a modified active profile: `Save Active Profile` snapshots the current config back into that profile.
+- On the active config file item: `Edit Active Profile JSON` opens the active config's `agents`/`categories` as JSON.
 
-The view title also provides `Refresh` and `Create Profile` buttons.
+The view title also provides `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` buttons.
 
 ## Commands
 
-The extension contributes 11 commands. All are prefixed with **Oh My OpenAgent**. Only `Open Agent Manager`, `Refresh`, and `Create Profile` are visible in the Command Palette. The remaining commands are contextual sidebar actions.
+The extension contributes 16 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
 
 | Command | Availability | What it does |
 | --- | --- | --- |
@@ -134,6 +137,11 @@ The extension contributes 11 commands. All are prefixed with **Oh My OpenAgent**
 | `Duplicate Profile` | Contextual | Creates a copy of the selected profile. |
 | `Delete Profile` | Contextual | Deletes the selected profile after confirmation. |
 | `Save Active Profile` | Contextual | Saves the current config into the modified active profile. |
+| `Import Profiles` | Command Palette and view title | Imports one `.json` or `.jsonc` file as a single profile fragment or a full sidecar. |
+| `Export All Profiles` | Command Palette and view title | Exports the full sidecar to a JSON file. |
+| `Export Profile` | Contextual | Exports the selected profile as a single `{ agents, categories }` fragment. |
+| `Edit Profile JSON` | Contextual | Opens the selected saved profile's `agents`/`categories` as JSON for editing. |
+| `Edit Active Profile JSON` | Contextual | Opens the active config's `agents`/`categories` as JSON for editing. |
 
 ## Profiles
 
@@ -160,6 +168,66 @@ Activation preserves comments and trailing commas in the active config because i
 - **Duplicate** creates a deep copy under a new name; the original is unchanged.
 - **Delete** asks for confirmation and removes the profile. If it was the active profile, the active marker is cleared.
 
+### Import and export format
+
+The transfer layer accepts both single-profile fragments and full sidecar files. Input may be JSON or JSONC (comments and trailing commas are allowed). Output is always canonical JSON with two-space indentation and sorted object keys.
+
+A single-profile fragment contains only the profile payload:
+
+```json
+{
+  "agents": {
+    "sisyphus": {
+      "model": "opencode-go/kimi-k2.7-code"
+    }
+  },
+  "categories": {
+  }
+}
+```
+
+At least one of `agents` or `categories` must be present. The top-level keys `version` and `profiles` are reserved for sidecar files; a fragment cannot mix them with `agents` or `categories`.
+
+A full sidecar follows this shape:
+
+```json
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "fast",
+      "agents": {
+        "sisyphus": {
+          "model": "opencode-go/kimi-k2.7-code"
+        }
+      },
+      "createdAt": "2026-07-23T12:00:00Z",
+      "updatedAt": "2026-07-23T12:00:00Z"
+    }
+  ],
+  "lastActiveProfile": "fast"
+}
+```
+
+`version` must be `1`. `profiles` is required. `lastActiveProfile` is optional. Each profile object may contain `name`, `description`, `agents`, `categories`, `createdAt`, and `updatedAt`. Timestamps must be valid ISO 8601 strings.
+
+Import semantics:
+
+- **JSONC input is accepted**; the parser allows comments and trailing commas. Canonical JSON is produced on export.
+- **Semantic losslessness**: values and structure survive, but comments, formatting, and key order are normalized. Export sorts object keys alphabetically.
+- **Extend (default)** appends imported profiles to the existing list. **Replace** overwrites the existing list.
+- **Name collisions** are resolved with exact case-sensitive matching. If `fast` already exists, the imported profile becomes `fast-2`, then `fast-3`, and so on.
+- **Size limit**: transfer inputs are rejected when they exceed 5 MiB. UTF-8 is required; a leading UTF-8 BOM is accepted and stripped.
+- **Imported `lastActiveProfile` is ignored**. Your local active marker is preserved only when a profile with that exact name still exists after the import.
+- **No auto-activation**: importing a profile or sidecar updates the sidecar file only; the active config is not changed.
+
+Export semantics:
+
+- **Single-profile export** writes `{ agents?, categories? }` as a fragment file.
+- **Full sidecar export** writes `{ version: 1, profiles: [...], lastActiveProfile? }`.
+- **Provider options warning**: export warns when a profile contains non-empty `providerOptions`, because provider options often hold credentials or API keys. The warning is informational; you can cancel or proceed.
+- **Active saved-profile save**: when you save a modified active profile, the active config is updated first, then the profile is snapshotted. If snapshotting fails, the config change remains and the sidecar stays unchanged, so partial failures leave the live config in the intended state.
+
 ## Architecture
 
 The extension follows a clean layered architecture with strict separation of concerns:
@@ -167,17 +235,28 @@ The extension follows a clean layered architecture with strict separation of con
 ```
 extension.ts  (activation orchestrator)
      |
-     ├── commands.ts  (11 command handlers)
+     ├── commands.ts  (16 command registrations)
+     |
+     ├── profileTransferCommands.ts  (import/export/JSON-edit handlers)
+     │   ├── profileTransferCommandHandlers.ts
+     │   └── profileTransferFiles.ts  (VS Code open/save dialog helpers)
      |
      ├── ui/
      │   ├── agentModelTreeProvider.ts  (sidebar TreeDataProvider)
-     │   ├── agentEditorPanel.ts  (webview panel singleton)
-     │   └── webview/  (ordered model routing and capability validation)
+     │   ├── agentEditorPanel.ts  (webview panel singleton and JSON editor host)
+     │   ├── profileJsonEditorHost.ts  (active/saved profile JSON editing protocol)
+     │   └── webview/  (ordered model routing, capability validation, and ProfileJsonEditor)
+     │       ├── App.svelte / AgentFormEditor.svelte
+     │       └── ProfileJsonEditor.svelte
      │
      └── config/
          ├── schema.ts  (TypeScript types for OmO config)
          ├── configStore.ts  (JSONC read/write, file watching)
-         └── profileStore.ts  (profile CRUD, activation)
+         ├── profileStore.ts  (profile CRUD, activation, import/export)
+         ├── profileTransfer.ts  (parser and byte-limit/UTF-8 validation)
+         ├── profileValidation.ts  (fragment/sidecar runtime validator)
+         ├── profileEntryValidation.ts  (per-field validation rules)
+         └── profileTransferSerialization.ts  (canonical JSON, name collision, export helpers)
 ```
 
 ### Key design decisions
@@ -188,6 +267,8 @@ extension.ts  (activation orchestrator)
 - **Webview security** — strict CSP with `default-src 'none'`, per-render nonces via `crypto.randomBytes(16)`, local resource roots restricted to `out/` only, and all DOM text insertion uses `.textContent` (never `innerHTML`).
 - **Singleton editor panel** — `AgentEditorPanel` uses a static `currentPanel` reference to prevent multiple webview instances. Panel state survives tab switches via `retainContextWhenHidden: true`.
 - **Sidecar profiles** — profiles are stored in a separate plain JSON file (`oh-my-openagent.profiles.json`) so the main OmO config stays schema-clean. Profile activation writes into the main config through the JSONC-preserving `ConfigStore.updateConfig()` path.
+- **Transfer canonical JSON** — export serializes only JSON-safe values (null, booleans, finite numbers, strings, dense arrays, and plain objects), sorts keys, and appends a trailing newline. This prevents accidental disclosure of getters, symbols, or cyclic structures.
+- **Profile JSON editor host** — `profileJsonEditorHost.ts` isolates the active/saved target protocol from the UI, while `ProfileJsonEditor.svelte` provides a focused textarea with save, dirty tracking, and error display.
 
 ### Built-in inventory
 
@@ -228,13 +309,22 @@ Tests are written with Vitest. The suite covers the extension's main behaviors:
 | `modelDiscovery.test.ts` | `opencode models` parsing, fallback handling, metadata normalization, and cache behavior |
 | `agentModelTreeProvider.test.ts` | Tree structure, context values, override detection, active profile indicators, refresh, and disposal |
 | `agentEditorPanel.test.ts` | Webview lifecycle, messages, save writes, profile creation, and model discovery reloads |
-| `profileStore.test.ts` | Profile creation, rename, duplicate, isolation, activation, save-back, and change events |
-| `smoke.test.ts` | End-to-end editor saves across stores, panel, tree, and JSONC writes |
-| `packageMenus.test.ts` | The 11-command contribution surface and contextual menu visibility |
+| `profileStore.test.ts` | Profile creation, rename, duplicate, isolation, activation, save-back, import, export, and change events |
+| `profileTransfer.test.ts` | Byte limits, UTF-8 handling, JSONC parsing, duplicate-key detection, and fragment/sidecar classification |
+| `profileTransferSerialization.test.ts` | Canonical JSON serialization, name derivation, collision resolution, and provider-options detection |
+| `profileValidation.test.ts` | Fragment and sidecar validation, timestamp checks, nested field policies, and unknown-key rejection |
+| `profileTransferCommands.test.ts` | Import/export/JSON-edit command handlers, dialogs, cancellation, and error reporting |
+| `profileTransferFiles.test.ts` | VS Code open/save dialog helpers and successful transfer-file operations |
+| `profileTransferFiles.rejections.test.ts` | Primitive rejection contract for transfer-file dialog failures |
+| `smoke.test.ts` | End-to-end editor saves across stores, panel, tree, JSONC writes, profile transfer round-trips, and JSON editing |
+| `packageMenus.test.ts` | The 16-command contribution surface and contextual menu visibility |
 | `configStore.test.ts` | Config discovery, JSONC parsing, formatting-preserving updates, key removal, and file watching |
 | `modelRouting.test.ts` | Ordered-card promotion, shared defaults, fallback inheritance and overrides, serialization, removal, and session-bound routing intent |
 | `modelCapabilities.test.ts` | Capability validation for effective inherited and overridden settings |
-| `webview.test.ts` | Model picker behavior and ordered-list editor integration, including drag promotion, fallback editing, and persisted state |
+| `webview.test.ts` | Model picker behavior, ordered-list editor integration, drag promotion, fallback editing, profile JSON editor UI, and persisted state |
+| `editorPayloadValidation.test.ts` | Structured-editor allow-lists for agent and category save payloads |
+| `reorder.test.ts` | Fallback list reordering via drag and keyboard |
+| `schema.test.ts` | Profile schema contract and shape invariants |
 
 The JSONC preservation tests verify that comments, trailing commas, and formatting survive round-trips through `updateConfig()` and profile activation — confirmed against real config fixtures with inline comments and trailing commas.
 
@@ -251,9 +341,11 @@ npm test
    npm run package
    ```
 
+   `npm run package` produces a `.vsix` file in the current directory.
+
 3. The resulting `.vsix` file can be uploaded to a release page or installed directly.
 
-The `package` script uses the maintained `@vscode/vsce` packaging tool. The packaging rules in `.vscodeignore` make sure `out/extension.js`, `out/webview.js`, `src/ui/webview/webview.html`, and `src/ui/webview/webview.css` are included, while source maps, tests, and `node_modules` are excluded.
+The `package` script uses the maintained `@vscode/vsce` packaging tool. The packaging rules in `.vscodeignore` make sure `out/extension.js`, `out/webview.js`, `src/ui/webview/webview.html`, and `src/ui/webview/webview.css` are included, while source maps, tests, and `node_modules` are excluded. Generated VSIX files and verification evidence are kept in `.omo/evidence` and are not committed.
 
 ## License
 
