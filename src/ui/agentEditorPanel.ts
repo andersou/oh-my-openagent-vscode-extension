@@ -10,7 +10,7 @@
 //
 // The panel is singleton-style: at most one editor is open at a time. When
 // `show()` is invoked for a different item, the existing panel is reused
-// and its content swapped rather than spawning a second one.
+// and its content is swapped rather than spawning a second one.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -24,8 +24,17 @@ import { BUILTIN_AGENTS, BUILTIN_CATEGORIES } from '../config/schema.js';
 import type { ModelDiscovery } from '../opencode/modelDiscovery.js';
 import type { AgentModelTreeProvider } from './agentModelTreeProvider.js';
 import { validateAndClean } from './editorPayloadValidation.js';
+import { serializeProfileTransfer } from '../config/profileTransferSerialization.js';
+import {
+  getProfileJsonInitText,
+  parseProfileJsonTarget,
+  profileJsonTargetMatches,
+  saveProfileJson,
+  type ProfileJsonTarget,
+} from './profileJsonEditorHost.js';
 
 export { validateAndClean } from './editorPayloadValidation.js';
+export type { ProfileJsonTarget } from './profileJsonEditorHost.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -34,13 +43,13 @@ export { validateAndClean } from './editorPayloadValidation.js';
 /** Identifies which entity the editor is showing. */
 export type EditorItem =
   | { type: 'agent'; name: string; profile?: string }
-  | { type: 'category'; name: string; profile?: string };
+  | { type: 'category'; name: string; profile?: string }
+  | ProfileJsonTarget;
 
-type EditorTarget = {
-  readonly type: EditorItem['type'];
-  readonly name: string;
-  readonly profile: string | null;
-};
+type VersionedTarget =
+  | { v: 1; type: 'agent'; name: string; profile: string | null }
+  | { v: 1; type: 'category'; name: string; profile: string | null }
+  | { v: 1; type: 'profileJson'; source: 'active' | 'saved'; profile: string | null };
 
 // ---------------------------------------------------------------------------
 // Internal constants & helpers
@@ -124,15 +133,24 @@ function getNullKeys(raw: unknown): Set<string> {
   return nullKeys;
 }
 
-function targetFor(item: EditorItem): EditorTarget {
+function versionedTargetFor(item: EditorItem): VersionedTarget {
+  if (item.type === 'profileJson') {
+    return {
+      v: 1,
+      type: 'profileJson',
+      source: item.source,
+      profile: item.source === 'saved' ? item.profile : null,
+    };
+  }
   return {
+    v: 1,
     type: item.type,
     name: item.name,
     profile: item.profile ?? null,
   };
 }
 
-function parseTarget(raw: unknown): EditorTarget | undefined {
+function parseAgentCategoryTarget(raw: unknown): VersionedTarget | undefined {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return undefined;
   }
@@ -149,17 +167,24 @@ function parseTarget(raw: unknown): EditorTarget | undefined {
     return undefined;
   }
   return {
+    v: 1,
     type: target.type,
     name: target.name,
     profile: target.profile ?? null,
   };
 }
 
-function sameTarget(left: EditorTarget, right: EditorTarget): boolean {
+function sameVersionedTarget(left: VersionedTarget, right: VersionedTarget): boolean {
+  if (left.type !== right.type) return false;
+  if (left.type === 'profileJson') {
+    return (
+      left.source === (right as { source: 'active' | 'saved' }).source &&
+      left.profile === (right as { profile: string | null }).profile
+    );
+  }
   return (
-    left.type === right.type &&
-    left.name === right.name &&
-    left.profile === right.profile
+    left.name === (right as { name: string }).name &&
+    left.profile === (right as { profile: string | null }).profile
   );
 }
 
@@ -181,7 +206,8 @@ export class AgentEditorPanel implements vscode.Disposable {
   private readonly _treeProvider: AgentModelTreeProvider;
   private readonly _extensionPath: string;
   private _item: EditorItem;
-  private _dirty = false;
+  private _versionedTarget: VersionedTarget;
+  private readonly _dirtyStates = new Map<string, boolean>();
   private readonly _disposables: vscode.Disposable[] = [];
 
   private constructor(
@@ -200,6 +226,7 @@ export class AgentEditorPanel implements vscode.Disposable {
     this._modelDiscovery = modelDiscovery;
     this._treeProvider = treeProvider;
     this._item = item;
+    this._versionedTarget = versionedTargetFor(item);
 
     this._updateTitle();
     this._panel.webview.html = this._renderHtml();
@@ -279,11 +306,70 @@ export class AgentEditorPanel implements vscode.Disposable {
     }
   }
 
+  /**
+   * Open a read-only JSON editor for a saved profile (when `profileName` is
+   * given) or the active config's profile fragment (when omitted). This is the
+   * host-side contract the transfer commands use; Todo 10 may replace the text
+   * editor implementation with a dedicated webview panel without changing the
+   * command handlers.
+   */
+  public static showProfileJson(
+    configStore: ConfigStore,
+    profileStore: ProfileStore,
+    profileName?: string,
+  ): void {
+    const fragment =
+      profileName !== undefined
+        ? profileStore.getProfileFragment(profileName)
+        : {
+            agents: configStore.getConfig().agents,
+            categories: configStore.getConfig().categories,
+          };
+
+    const content = serializeProfileTransfer(fragment);
+    const title = profileName
+      ? `${profileName}.profile.json`
+      : 'active-config.profile.json';
+
+    void (async () => {
+      try {
+        const document = await vscode.workspace.openTextDocument({
+          content,
+          language: 'json',
+        });
+        await vscode.window.showTextDocument(document, { preview: false });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        void vscode.window.showErrorMessage(
+          `Failed to open profile JSON: ${message}`,
+        );
+      }
+    })();
+  }
+
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
 
+  private _getIsDirty(): boolean {
+    return this._dirtyStates.get(this._targetKey) ?? false;
+  }
+
+  private _setDirty(dirty: boolean): void {
+    this._dirtyStates.set(this._targetKey, dirty);
+    this._updateTitle();
+  }
+
+  private get _targetKey(): string {
+    return JSON.stringify(this._versionedTarget);
+  }
+
   private static _titleFor(item: EditorItem): string {
+    if (item.type === 'profileJson') {
+      return item.source === 'active'
+        ? 'Profile JSON: active config'
+        : `Profile JSON: ${item.profile}`;
+    }
     const prefix = item.type === 'agent' ? 'Agent Model' : 'Category Model';
     const suffix = item.profile ? ` (profile: ${item.profile})` : '';
     return `${prefix}: ${item.name}${suffix}`;
@@ -291,18 +377,28 @@ export class AgentEditorPanel implements vscode.Disposable {
 
   private _updateTitle(): void {
     const baseTitle = AgentEditorPanel._titleFor(this._item);
-    this._panel.title = this._dirty ? `● ${baseTitle} (unsaved)` : baseTitle;
+    this._panel.title = this._getIsDirty() ? `● ${baseTitle} (unsaved)` : baseTitle;
   }
 
   private _matchesCurrentTarget(rawTarget: unknown): boolean {
-    const target = parseTarget(rawTarget);
-    return target !== undefined && sameTarget(target, targetFor(this._item));
+    const parsed = parseAgentCategoryTarget(rawTarget);
+    return parsed !== undefined && sameVersionedTarget(parsed, this._versionedTarget);
+  }
+
+  private _matchesCurrentProfileJsonTarget(rawTarget: unknown): boolean {
+    const parsed = parseProfileJsonTarget(rawTarget);
+    return (
+      parsed !== undefined &&
+      this._item.type === 'profileJson' &&
+      profileJsonTargetMatches(parsed, this._item)
+    );
   }
 
   /** Switch the panel to a different item and refresh the HTML. */
   private _switchItem(item: EditorItem): void {
-    this._dirty = false;
     this._item = item;
+    this._versionedTarget = versionedTargetFor(item);
+    this._dirtyStates.set(this._targetKey, false);
     this._updateTitle();
     this._panel.webview.html = this._renderHtml();
   }
@@ -341,6 +437,17 @@ export class AgentEditorPanel implements vscode.Disposable {
 
   private _sendInit(): void {
     const item = this._item;
+    if (item.type === 'profileJson') {
+      const text = getProfileJsonInitText(item, this._profileStore, this._configStore);
+      this._panel.webview.postMessage({
+        command: 'init',
+        type: 'profileJson',
+        source: item.source,
+        profile: item.source === 'saved' ? item.profile : null,
+        text,
+      });
+      return;
+    }
     const profile = item.profile
       ? this._profileStore.getProfile(item.profile)
       : undefined;
@@ -432,24 +539,40 @@ export class AgentEditorPanel implements vscode.Disposable {
 
     if (command === 'ready') {
       this._sendInit();
-      this._startModelDiscovery();
+      if (this._item.type !== 'profileJson') {
+        this._startModelDiscovery();
+      }
       return;
     }
     if (command === 'save') {
       const payload = (msg as { payload?: unknown }).payload;
       const target = (msg as { target?: unknown }).target;
+      if (this._item.type === 'profileJson') {
+        if (!this._matchesCurrentProfileJsonTarget(target)) {
+          return;
+        }
+        const item = this._item;
+        await this._handleProfileJsonSave(item, payload, target);
+        return;
+      }
       if (!this._matchesCurrentTarget(target)) {
         return;
       }
-      await this._handleSave(payload, parseTarget(target));
+      await this._handleSave(payload, parseAgentCategoryTarget(target));
       return;
     }
     if (command === 'dirtyState') {
       const dirty = (msg as { dirty?: unknown }).dirty;
       const target = (msg as { target?: unknown }).target;
-      if (typeof dirty === 'boolean' && this._matchesCurrentTarget(target)) {
-        this._dirty = dirty;
-        this._updateTitle();
+      if (typeof dirty !== 'boolean') {
+        return;
+      }
+      if (this._item.type === 'profileJson') {
+        if (this._matchesCurrentProfileJsonTarget(target)) {
+          this._setDirty(dirty);
+        }
+      } else if (this._matchesCurrentTarget(target)) {
+        this._setDirty(dirty);
       }
       return;
     }
@@ -460,14 +583,57 @@ export class AgentEditorPanel implements vscode.Disposable {
     // Unknown command: ignore silently.
   }
 
-  private async _handleSave(
+  private async _handleProfileJsonSave(
+    item: ProfileJsonTarget,
     rawPayload: unknown,
-    target: EditorTarget | undefined,
+    rawTarget: unknown,
   ): Promise<void> {
-    if (target === undefined) {
+    const text =
+      typeof rawPayload === 'string'
+        ? rawPayload
+        : typeof rawPayload === 'object' && rawPayload !== null
+          ? (rawPayload as { text?: unknown }).text
+          : undefined;
+    if (typeof text !== 'string') {
+      this._panel.webview.postMessage({
+        command: 'error',
+        message: 'Expected text payload',
+        target: rawTarget,
+      });
       return;
     }
-    const item: EditorItem = {
+
+    const result = await saveProfileJson(
+      item,
+      text,
+      this._profileStore,
+      this._configStore,
+    );
+    if (!result.ok) {
+      this._panel.webview.postMessage({
+        command: 'error',
+        message: result.message,
+        target: rawTarget,
+      });
+      return;
+    }
+
+    this._setDirty(false);
+    this._panel.webview.postMessage({
+      command: 'saved',
+      target: rawTarget,
+      text: result.canonicalText,
+    });
+  }
+
+  private async _handleSave(
+    rawPayload: unknown,
+    target: VersionedTarget | undefined,
+  ): Promise<void> {
+    if (target === undefined || target.type === 'profileJson') {
+      return;
+    }
+    const item: Exclude<EditorItem, ProfileJsonTarget> = {
       type: target.type,
       name: target.name,
       ...(target.profile === null ? {} : { profile: target.profile }),
@@ -557,9 +723,8 @@ export class AgentEditorPanel implements vscode.Disposable {
         }
       }
 
-      if (sameTarget(target, targetFor(this._item))) {
-        this._dirty = false;
-        this._updateTitle();
+      if (sameVersionedTarget(target, this._versionedTarget)) {
+        this._setDirty(false);
       }
       this._panel.webview.postMessage({ command: 'saved', target });
     } catch (err: unknown) {

@@ -8,6 +8,7 @@ import {
 } from 'jsonc-parser';
 
 export * from './profileTransferSerialization.js';
+export { validateProfileTransfer } from './profileValidation.js';
 
 export const MAX_PROFILE_TRANSFER_BYTES = 5 * 1024 * 1024;
 
@@ -278,3 +279,5 @@ export function parseProfileTransfer(
     },
   };
 }
+
+export const parseProfileTransferBytes = parseProfileTransfer;
