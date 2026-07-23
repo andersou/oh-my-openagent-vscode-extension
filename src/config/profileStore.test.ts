@@ -988,4 +988,298 @@ describe('ProfileStore', () => {
       expect(profileStore.getActiveProfileName()).toBe('alpha');
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Transfer snapshots and replacement (Todo 7)
+  // -----------------------------------------------------------------------
+
+  describe('getProfileFragment', () => {
+    it('returns a deep clone of the profile fragment omitting metadata', async () => {
+      // Given: a profile with both agents and categories
+      setupWithConfig(CONFIG_WITH_COMMENTS);
+      const created = await profileStore.createProfile('source', 'desc');
+
+      // When: exporting the fragment
+      const fragment = profileStore.getProfileFragment('source');
+
+      // Then: only agents and categories are returned, deeply cloned
+      expect(fragment).toEqual({
+        agents: created.agents,
+        categories: created.categories,
+      });
+      // Mutation of the returned fragment does not affect the store
+      fragment.agents!.sisyphus!.model = 'mutated/model';
+      expect(profileStore.getProfile('source')!.agents!.sisyphus!.model).toBe(
+        'sisyphus/model',
+      );
+    });
+
+    it('omits agents when the profile has no agents section', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('no-agents');
+      await profileStore.updateProfile('no-agents', {
+        categories: { deep: { model: 'deep/model' } },
+        agents: undefined,
+      });
+
+      const fragment = profileStore.getProfileFragment('no-agents');
+
+      expect(fragment.agents).toBeUndefined();
+      expect(fragment.categories).toBeDefined();
+    });
+
+    it('omits categories when the profile has no categories section', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('no-categories');
+      await profileStore.updateProfile('no-categories', {
+        categories: undefined,
+      });
+
+      const fragment = profileStore.getProfileFragment('no-categories');
+
+      expect(fragment.categories).toBeUndefined();
+      expect(fragment.agents).toBeDefined();
+    });
+
+    it('throws when the profile does not exist', () => {
+      setupWithConfig(CONFIG_MINIMAL);
+
+      expect(() => profileStore.getProfileFragment('ghost')).toThrow(
+        'Profile "ghost" not found',
+      );
+    });
+  });
+
+  describe('getProfilesFileSnapshot', () => {
+    it('returns a normalized deep clone of the whole sidecar', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('alpha');
+      await profileStore.createProfile('beta');
+
+      const snapshot = profileStore.getProfilesFileSnapshot();
+
+      expect(snapshot.version).toBe(1);
+      expect(snapshot.profiles).toHaveLength(2);
+      expect(snapshot.profiles[0].name).toBe('alpha');
+      expect(snapshot.profiles[1].name).toBe('beta');
+      // Returned snapshot is a deep clone
+      snapshot.profiles[0].name = 'mutated';
+      expect(profileStore.listProfiles()[0].name).toBe('alpha');
+    });
+
+    it('includes lastActiveProfile when present', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('active');
+      await profileStore.activateProfile('active');
+
+      const snapshot = profileStore.getProfilesFileSnapshot();
+
+      expect(snapshot.lastActiveProfile).toBe('active');
+    });
+
+    it('returns an empty profiles list when the sidecar does not exist', () => {
+      createStores();
+
+      const snapshot = profileStore.getProfilesFileSnapshot();
+
+      expect(snapshot).toEqual({ version: 1, profiles: [] });
+    });
+  });
+
+  describe('replaceProfileFragment', () => {
+    it('replaces only the agents and categories of the named profile', async () => {
+      // Given: a profile with metadata and existing agents/categories
+      setupWithConfig(CONFIG_MINIMAL);
+      const original = await profileStore.createProfile('target', 'original desc');
+      await profileStore.updateProfile('target', {
+        categories: { deep: { model: 'old/category' } },
+      });
+      const originalCreatedAt = original.createdAt;
+
+      // When: replacing the fragment
+      const fragment: ProfileFragment = {
+        agents: { explore: { model: 'new/model' } },
+      };
+      const updated = await profileStore.replaceProfileFragment('target', fragment);
+
+      // Then: name, description, and createdAt are preserved; updatedAt is refreshed
+      expect(updated.name).toBe('target');
+      expect(updated.description).toBe('original desc');
+      expect(updated.createdAt).toBe(originalCreatedAt);
+      expect(updated.updatedAt).not.toBe(original.updatedAt);
+      expect(new Date(updated.updatedAt!).getTime()).toBeGreaterThan(
+        new Date(original.updatedAt!).getTime(),
+      );
+      expect(updated.agents).toEqual({ explore: { model: 'new/model' } });
+      expect(updated.categories).toBeUndefined();
+
+      // On disk matches
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles[0].agents).toEqual({
+        explore: { model: 'new/model' },
+      });
+      expect(onDisk.profiles[0].categories).toBeUndefined();
+    });
+
+    it('deletes stored section when replacement fragment omits it', async () => {
+      setupWithConfig(CONFIG_WITH_COMMENTS);
+      const original = await profileStore.createProfile('both');
+      expect(original.agents).toBeDefined();
+      expect(original.categories).toBeDefined();
+
+      const updated = await profileStore.replaceProfileFragment('both', {
+        categories: { quick: { model: 'quick/model' } },
+      });
+
+      expect(updated.agents).toBeUndefined();
+      expect(updated.categories).toEqual({ quick: { model: 'quick/model' } });
+      expect(profileStore.getProfile('both')!.agents).toBeUndefined();
+    });
+
+    it('clones the input fragment so caller mutations do not affect the store', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('clone');
+      const fragment: ProfileFragment = {
+        agents: { sisyphus: { model: 'before' } },
+      };
+
+      await profileStore.replaceProfileFragment('clone', fragment);
+      fragment.agents!.sisyphus!.model = 'after';
+
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles[0].agents.sisyphus.model).toBe('before');
+    });
+
+    it('emits exactly one change event and writes once', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('event');
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.replaceProfileFragment('event', {
+        agents: { sisyphus: { model: 'event/model' } },
+      });
+
+      expect(changes).toBe(1);
+    });
+
+    it('throws when the profile does not exist', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+
+      await expect(
+        profileStore.replaceProfileFragment('ghost', { agents: {} }),
+      ).rejects.toThrow('Profile "ghost" not found');
+    });
+  });
+
+  describe('replaceActiveConfigFragment', () => {
+    it('replaces agents and categories in the live config preserving comments and unrelated keys', async () => {
+      // Given: a config with comments, agent_order, and a saved profile
+      setupWithConfig(CONFIG_WITH_COMMENTS);
+      await profileStore.createProfile('snap');
+
+      // When: editing only the live config via the active config fragment helper
+      await profileStore.replaceActiveConfigFragment({
+        agents: { hephaestus: { model: 'hephaestus/new' } },
+      });
+
+      // Then: the live config contains the new agent and drops the old ones
+      const cfg = configStore.getConfig();
+      expect(cfg.agents).toEqual({ hephaestus: { model: 'hephaestus/new' } });
+      expect(cfg.categories).toBeUndefined();
+
+      // Comments and unrelated keys survive on disk
+      const raw = readConfig(configPath);
+      expect(raw).toContain('// Top-level comment');
+      expect(raw).toContain('"agent_order"');
+      expect(raw).toContain('"hephaestus"');
+      expect(raw).toContain('"hephaestus/new"');
+      expect(raw).not.toContain('"sisyphus/model"');
+      expect(raw).not.toContain('"explore/model"');
+      expect(cfg.agent_order).toEqual(['sisyphus', 'explore']);
+    });
+
+    it('preserves comments on untouched keys when replacing categories', async () => {
+      setupWithConfig(CONFIG_WITH_COMMENTS);
+      await profileStore.createProfile('snap');
+
+      await profileStore.replaceActiveConfigFragment({
+        agents: { sisyphus: { model: 'sisyphus/model' } },
+        categories: { writing: { model: 'writing/new' } },
+      });
+
+      const cfg = configStore.getConfig();
+      expect(cfg.categories).toEqual({
+        writing: { model: 'writing/new' },
+      });
+      expect(cfg.agents).toEqual({
+        sisyphus: { model: 'sisyphus/model' },
+      });
+
+      const raw = readConfig(configPath);
+      expect(raw).toContain('// Top-level comment');
+      expect(raw).toContain('// inline comment');
+      expect(raw).toContain('"agent_order"');
+    });
+
+    it('deletes a live config section when the replacement omits it', async () => {
+      setupWithConfig(CONFIG_WITH_COMMENTS);
+
+      await profileStore.replaceActiveConfigFragment({
+        agents: { sisyphus: { model: 'sisyphus/only' } },
+      });
+
+      const cfg = configStore.getConfig();
+      expect(cfg.agents).toEqual({ sisyphus: { model: 'sisyphus/only' } });
+      expect(cfg.categories).toBeUndefined();
+      const raw = readConfig(configPath);
+      expect(raw).not.toContain('"deep"');
+      expect(raw).not.toContain('// category comment');
+    });
+
+    it('clones the input fragment so caller mutations do not affect the live config', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const fragment: ProfileFragment = {
+        agents: { sisyphus: { model: 'before' } },
+      };
+
+      await profileStore.replaceActiveConfigFragment(fragment);
+      fragment.agents!.sisyphus!.model = 'after';
+
+      expect(configStore.getAgent('sisyphus')?.model).toBe('before');
+    });
+
+    it('does not mutate the sidecar when editing the active config', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('sidecar');
+      const before = readSidecar(sidecarPath);
+
+      await profileStore.replaceActiveConfigFragment({
+        agents: { sisyphus: { model: 'active/new' } },
+      });
+
+      const after = readSidecar(sidecarPath);
+      expect(after).toEqual(before);
+      expect(profileStore.getProfile('sidecar')!.agents!.sisyphus!.model).toBe(
+        'minimal/model',
+      );
+    });
+
+    it('emits a config change event', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      let changes = 0;
+      configStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.replaceActiveConfigFragment({
+        agents: { sisyphus: { model: 'changed' } },
+      });
+
+      expect(changes).toBe(1);
+      expect(configStore.getAgent('sisyphus')?.model).toBe('changed');
+    });
+  });
 });

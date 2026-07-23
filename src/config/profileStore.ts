@@ -18,6 +18,7 @@ import {
   cloneProfileFragment,
   cloneProfilesFile,
   deriveProfileNameFromSource,
+  exportProfileFragment,
   resolveProfileNameCollisions,
 } from './profileTransferSerialization.js';
 
@@ -164,9 +165,93 @@ export class ProfileStore {
   }
 
   /**
-   * Create a new profile by snapshotting the current `agents` / `categories`
-   * from the active config. Name must be unique (case-sensitive).
+   * Return a deep-cloned `ProfileFragment` (only `agents` and `categories`) of
+   * the named saved profile. Throws when the profile does not exist.
    */
+  getProfileFragment(name: string): ProfileFragment {
+    const profile = this.getProfile(name);
+    if (!profile) {
+      throw new Error(`Profile "${name}" not found`);
+    }
+    return exportProfileFragment(profile);
+  }
+
+  /**
+   * Return a deep-cloned, normalized snapshot of the entire sidecar file,
+   * suitable for full export. Mutating the returned object does not affect the
+   * store.
+   */
+  getProfilesFileSnapshot(): NormalizedProfilesFile {
+    const data = this.readProfilesFile();
+    return cloneProfilesFile({
+      version: 1,
+      profiles: data.profiles,
+      lastActiveProfile: data.lastActiveProfile,
+    });
+  }
+
+  /**
+   * Replace only the `agents` and `categories` of the named saved profile,
+   * preserving its `name`, `description`, and `createdAt`. Refresh `updatedAt`
+   * to now. Missing fragment sections delete the stored section. Throws when
+   * the profile does not exist.
+   */
+  async replaceProfileFragment(
+    name: string,
+    fragment: ProfileFragment,
+  ): Promise<Profile> {
+    const data = this.readProfilesFile();
+    const profile = data.profiles.find((p) => p.name === name);
+
+    if (!profile) {
+      throw new Error(`Profile "${name}" not found`);
+    }
+
+    const clone = cloneProfileFragment(fragment);
+    if (clone.agents === undefined) {
+      delete profile.agents;
+    } else {
+      profile.agents = clone.agents;
+    }
+
+    if (clone.categories === undefined) {
+      delete profile.categories;
+    } else {
+      profile.categories = clone.categories;
+    }
+
+    profile.updatedAt = new Date().toISOString();
+
+    await this.writeProfilesFile(data);
+
+    return profile;
+  }
+
+  /**
+   * Replace only the `agents` and `categories` of the live config via
+   * `ConfigStore.updateConfig`, preserving unrelated keys and JSONC comments.
+   * Missing fragment sections delete the corresponding live config sections.
+   * This never touches the sidecar.
+   */
+  async replaceActiveConfigFragment(
+    fragment: ProfileFragment,
+  ): Promise<void> {
+    const clone = cloneProfileFragment(fragment);
+
+    await this.configStore.updateConfig((draft: OmOConfig) => {
+      if (clone.agents === undefined) {
+        delete draft.agents;
+      } else {
+        draft.agents = clone.agents;
+      }
+
+      if (clone.categories === undefined) {
+        delete draft.categories;
+      } else {
+        draft.categories = clone.categories;
+      }
+    });
+  }
   async createProfile(
     name: string,
     description?: string,
