@@ -21,4 +21,11 @@ _Auto-scaffolded by /start-work. Append new entries below - never overwrite._
 - Task 6: In `extend` mode, `updatedAt` should be bumped only when the resolved name differs from the imported name; `replace` preserves imported timestamps verbatim.
 - Task 6: The local `lastActiveProfile` marker must be checked against the rebuilt profile list, because `replace` may remove the active profile entirely.
 
-(End of file - total 22 lines)
+- Task 7: `exportProfileFragment` and `cloneProfilesFile` from `profileTransferSerialization.ts` fit the snapshot APIs exactly. `getProfileFragment` omits metadata by construction, while `getProfilesFileSnapshot` normalizes `version` to `1` and deep-clones the whole sidecar.
+- Task 7: `replaceProfileFragment` reuses `cloneProfileFragment` and `writeProfilesFile` for one sidecar write and one `change` event. Missing fragment sections must explicitly `delete` the stored profile section.
+- Task 7: `replaceActiveConfigFragment` routes through `ConfigStore.updateConfig`, which preserves comments and unrelated keys on untouched sections. When the first root key (`agents`) is removed, `jsonc-parser` also drops the top-level comment preceding it, so tests for comment preservation should target untouched keys rather than deleted sections.
+
+- Task 8: Keep profile transfer commands in a focused module (`profileTransferCommands.ts`) with handlers in `profileTransferCommandHandlers.ts`; `commands.ts` only registers the resulting disposable. This keeps `commands.ts` as an aggregator and makes handlers testable with a small injected context.
+- Task 8: `AgentEditorPanel.showProfileJson` is the minimal host-side contract for the two edit commands; opening an untitled JSON document satisfies the requirement without depending on the full profile-JSON webview host.
+- Task 8: Cancellation at every dialog stage is a no-op; destructive replace requires a second modal confirmation. All user-facing messages are path-independent and never log the payload.
+- Task 8: Tests should assert registration parity, fragment/sidecar import paths, provider-options warning branches, every cancellation point, parse/store/FS errors, no payload logging, and no direct tree refresh.
