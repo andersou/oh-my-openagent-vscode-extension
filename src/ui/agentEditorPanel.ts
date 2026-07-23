@@ -317,11 +317,11 @@ export class AgentEditorPanel implements vscode.Disposable {
     treeProvider: AgentModelTreeProvider,
     profileName?: string,
   ): void {
-    AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, treeProvider, {
-      type: 'profileJson',
-      source: profileName !== undefined ? 'saved' : 'active',
-      ...(profileName !== undefined ? { profile: profileName } : {}),
-    });
+    const item: EditorItem =
+      profileName !== undefined
+        ? { type: 'profileJson', source: 'saved', profile: profileName }
+        : { type: 'profileJson', source: 'active' };
+    AgentEditorPanel.show(context, configStore, profileStore, modelDiscovery, treeProvider, item);
   }
 
   // -------------------------------------------------------------------------

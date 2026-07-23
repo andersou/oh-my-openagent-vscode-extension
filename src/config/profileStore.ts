@@ -183,11 +183,14 @@ export class ProfileStore {
    */
   getProfilesFileSnapshot(): NormalizedProfilesFile {
     const data = this.readProfilesFile();
-    return cloneProfilesFile({
+    const snapshot: NormalizedProfilesFile & { lastActiveProfile?: string } = {
       version: 1,
       profiles: data.profiles,
-      lastActiveProfile: data.lastActiveProfile,
-    });
+    };
+    if (data.lastActiveProfile !== undefined) {
+      snapshot.lastActiveProfile = data.lastActiveProfile;
+    }
+    return cloneProfilesFile(snapshot);
   }
 
   /**

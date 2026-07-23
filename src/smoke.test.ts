@@ -7,6 +7,23 @@ import { ProfileStore } from './config/profileStore.js';
 import { AgentModelTreeProvider } from './ui/agentModelTreeProvider.js';
 import { AgentEditorPanel } from './ui/agentEditorPanel.js';
 import { ModelDiscovery } from './opencode/modelDiscovery.js';
+import {
+  handleImportProfiles,
+  handleExportProfile,
+  handleExportAllProfiles,
+  type ProfileTransferCommandContext,
+} from './profileTransferCommands.js';
+import {
+  parseProfileTransferBytes,
+  serializeProfileTransfer,
+  containsProviderOptions,
+  sanitizeExportBasename,
+  MAX_PROFILE_TRANSFER_BYTES,
+} from './config/profileTransfer.js';
+import { validateProfileTransfer } from './config/profileValidation.js';
+import type { TransferFileResult, OpenedTransferFile } from './vscode/profileTransferFiles.js';
+import type { AgentModelTreeItem } from './ui/agentModelTreeProvider.js';
+import type { Profile } from './config/schema.js';
 
 const INITIAL_CONFIG = `{
   // initial comment
@@ -74,6 +91,106 @@ function makeExtensionContext(extensionPath: string) {
     extensionPath,
     subscriptions: [],
   } as unknown as import('vscode').ExtensionContext;
+}
+
+function makeProfileItem(name: string): AgentModelTreeItem {
+  return {
+    kind: 'profile',
+    contextValue: 'profile',
+    nodeName: name,
+  } as unknown as AgentModelTreeItem;
+}
+
+function readSidecar(tmpDir: string): { profiles: Profile[]; lastActiveProfile?: string; version: number } {
+  const sidecarPath = path.join(tmpDir, 'oh-my-openagent.profiles.json');
+  if (!fs.existsSync(sidecarPath)) {
+    return { profiles: [], version: 1 };
+  }
+  const raw = fs.readFileSync(sidecarPath, 'utf-8');
+  return JSON.parse(raw) as { profiles: Profile[]; lastActiveProfile?: string; version: number };
+}
+
+function createCommandContext(
+  configStore: ConfigStore,
+  profileStore: ProfileStore,
+  treeProvider: AgentModelTreeProvider,
+  extensionPath: string,
+  overrides: Partial<ProfileTransferCommandContext>,
+): ProfileTransferCommandContext {
+  return {
+    configStore,
+    profileStore,
+    showProfileJson: (profileName?: string) => {
+      AgentEditorPanel.showProfileJson(
+        makeExtensionContext(extensionPath),
+        configStore,
+        profileStore,
+        new ModelDiscovery(stubExecutor([]) as never, extensionPath),
+        treeProvider,
+        profileName,
+      );
+    },
+    openTransferFile: overrides.openTransferFile ?? (async () => ({ status: 'cancelled' } as TransferFileResult<OpenedTransferFile>)),
+    saveTransferFile: overrides.saveTransferFile ?? (async () => ({ status: 'cancelled' } as TransferFileResult<import('vscode').Uri>)),
+    parseProfileTransferBytes,
+    validateProfileTransfer,
+    serializeProfileTransfer,
+    containsProviderOptions,
+    sanitizeExportBasename,
+    showInformationMessage: overrides.showInformationMessage ?? (async () => undefined),
+    showWarningMessage: overrides.showWarningMessage ?? (async () => undefined),
+    showWarningMessageModal: overrides.showWarningMessageModal ?? (async () => undefined),
+    showErrorMessage: overrides.showErrorMessage ?? (async () => undefined),
+    showQuickPick: overrides.showQuickPick ?? (async () => undefined),
+  };
+}
+
+function makeSaveCapture() {
+  const captured: { bytes?: Uint8Array } = {};
+  return {
+    captured,
+    saveTransferFile: async (bytes: Uint8Array): Promise<TransferFileResult<import('vscode').Uri>> => {
+      captured.bytes = bytes;
+      return { status: 'success', value: { fsPath: '/out.json', scheme: 'file', path: '/out.json' } as unknown as import('vscode').Uri };
+    },
+  };
+}
+
+function makeMessageCapture() {
+  const info: string[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  return {
+    info,
+    warnings,
+    errors,
+    showInformationMessage: async (message: string): Promise<string | undefined> => {
+      info.push(message);
+      return undefined;
+    },
+    showWarningMessage: async (message: string): Promise<string | undefined> => {
+      warnings.push(message);
+      return undefined;
+    },
+    showWarningMessageModal: async (message: string, ...items: string[]): Promise<string | undefined> => {
+      warnings.push(message);
+      return items[0];
+    },
+    showErrorMessage: async (message: string): Promise<string | undefined> => {
+      errors.push(message);
+      return undefined;
+    },
+  };
+}
+
+function openedFileResult(bytes: Uint8Array, filePath: string): TransferFileResult<OpenedTransferFile> {
+  return {
+    status: 'success',
+    value: {
+      uri: { fsPath: filePath, scheme: 'file', path: filePath } as unknown as import('vscode').Uri,
+      bytes,
+    },
+  };
 }
 
 vi.mock('vscode', () => {
@@ -260,6 +377,487 @@ describe('smoke: end-to-end editor flow', () => {
     expect(profileStore.isActiveProfileModified()).toBe(false);
 
     configStore.dispose();
+  });
+
+  it('imports a fragment, exports it, and re-imports with collision', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+
+      const configStore = new ConfigStore(tmpDir);
+      const profileStore = new ProfileStore(configStore);
+      const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+      const messages = makeMessageCapture();
+
+      const fragmentText = JSON.stringify({
+        version: 1,
+        agent_order: ['sisyphus'],
+        unrelated: 'keep',
+        agents: { sisyphus: { model: 'm1' } },
+        categories: { quick: { model: 'm2' } },
+      }, null, 2);
+
+      const ctx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          openTransferFile: async () => openedFileResult(new TextEncoder().encode(fragmentText), '/tmp/import-me.json'),
+        },
+      );
+
+      await handleImportProfiles(ctx);
+
+      expect(messages.info).toContain('Imported profile "import-me".');
+      expect(profileStore.getProfile('import-me')).toEqual({
+        name: 'import-me',
+        agents: { sisyphus: { model: 'm1' } },
+        categories: { quick: { model: 'm2' } },
+        createdAt: '2026-01-02T03:04:05.000Z',
+        updatedAt: '2026-01-02T03:04:05.000Z',
+      });
+      expect(configStore.getAgent('sisyphus')?.model).toBe('old/model');
+      expect(profileStore.getActiveProfileName()).toBeUndefined();
+      expect(readSidecar(tmpDir).profiles).toHaveLength(1);
+
+      const freshProfileStore = new ProfileStore(new ConfigStore(tmpDir));
+      expect(freshProfileStore.getProfile('import-me')).toEqual(profileStore.getProfile('import-me'));
+
+      const saveCapture = makeSaveCapture();
+      const exportCtx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        { ...messages, saveTransferFile: saveCapture.saveTransferFile },
+      );
+      await handleExportProfile(exportCtx, makeProfileItem('import-me'));
+      expect(messages.info).toContain('Exported profile "import-me".');
+      expect(saveCapture.captured.bytes).toBeDefined();
+      const exportedText = new TextDecoder().decode(saveCapture.captured.bytes!);
+      expect(exportedText).toBe('{\n  "agents": {\n    "sisyphus": {\n      "model": "m1"\n    }\n  },\n  "categories": {\n    "quick": {\n      "model": "m2"\n    }\n  }\n}\n');
+
+      const reimportCtx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          openTransferFile: async () => openedFileResult(saveCapture.captured.bytes!, '/tmp/import-me.json'),
+        },
+      );
+      await handleImportProfiles(reimportCtx);
+      expect(messages.info).toContain('Imported profile "import-me-2".');
+      const names = profileStore.listProfiles().map((p) => p.name);
+      expect(names).toEqual(['import-me', 'import-me-2']);
+
+      configStore.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('exports all profiles and replace/extend imports with marker policy', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+
+      const configStore = new ConfigStore(tmpDir);
+      const profileStore = new ProfileStore(configStore);
+      await profileStore.createProfile('local-a');
+      await profileStore.createProfile('local-b');
+      await profileStore.activateProfile('local-b');
+      const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+      const messages = makeMessageCapture();
+
+      const saveCapture = makeSaveCapture();
+      const exportCtx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        { ...messages, saveTransferFile: saveCapture.saveTransferFile },
+      );
+      await handleExportAllProfiles(exportCtx);
+      expect(messages.info).toContain('Exported 2 profiles.');
+      expect(saveCapture.captured.bytes).toBeDefined();
+      const exportedText = new TextDecoder().decode(saveCapture.captured.bytes!);
+      expect(exportedText).toContain('"version": 1');
+      expect(exportedText).toContain('"lastActiveProfile": "local-b"');
+      expect(exportedText).toContain('"local-a"');
+      expect(exportedText).toContain('"local-b"');
+
+      const sidecar = readSidecar(tmpDir);
+      expect(sidecar.lastActiveProfile).toBe('local-b');
+      expect(sidecar.profiles.map((p) => p.name)).toEqual(['local-a', 'local-b']);
+
+      const sidecarWithoutActive = JSON.parse(exportedText) as { version: number; profiles: Profile[]; lastActiveProfile?: string };
+      delete sidecarWithoutActive.lastActiveProfile;
+      sidecarWithoutActive.profiles = sidecarWithoutActive.profiles.filter((p) => p.name !== 'local-b');
+      const sidecarBytes = new TextEncoder().encode(JSON.stringify(sidecarWithoutActive, null, 2));
+
+      const replaceCtx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          openTransferFile: async () => openedFileResult(sidecarBytes, '/tmp/sidecar.json'),
+          showQuickPick: async () =>
+            ({ label: 'Replace' }) as import('vscode').QuickPickItem,
+          showWarningMessageModal: async () =>
+            'Replace',
+        },
+      );
+    await handleImportProfiles(replaceCtx);
+      expect(messages.info).toContain('Imported 1 profile (replace mode).');
+      expect(readSidecar(tmpDir).profiles.map((p) => p.name)).toEqual(['local-a']);
+      expect(readSidecar(tmpDir).lastActiveProfile).toBeUndefined();
+      expect(profileStore.getActiveProfileName()).toBeUndefined();
+
+      const extendCtx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          openTransferFile: async () => openedFileResult(sidecarBytes, '/tmp/sidecar.json'),
+          showQuickPick: async () =>
+            ({ label: 'Extend' }) as import('vscode').QuickPickItem,
+        },
+      );
+      await handleImportProfiles(extendCtx);
+      expect(messages.info).toContain('Imported 1 profile (extend mode).');
+      expect(readSidecar(tmpDir).profiles.map((p) => p.name)).toEqual(['local-a', 'local-a-2']);
+      expect(profileStore.getActiveProfileName()).toBeUndefined();
+
+      configStore.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('edits saved-profile and active-config JSON through the panel', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+
+      const configStore = new ConfigStore(tmpDir);
+      const profileStore = new ProfileStore(configStore);
+      await profileStore.createProfile('editable');
+      await configStore.updateConfig((draft) => {
+        if (!draft.agents) draft.agents = {};
+        draft.agents.sisyphus = { model: 'fresh/model' };
+      });
+      const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+      const modelDiscovery = new ModelDiscovery(stubExecutor([]) as never, extensionPath);
+
+      const { panel, sendToWebview, messages } = makeMockWebviewPanel();
+      vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+      AgentEditorPanel.showProfileJson(
+        makeExtensionContext(extensionPath),
+        configStore,
+        profileStore,
+        modelDiscovery,
+        treeProvider,
+        'editable',
+      );
+      sendToWebview('ready');
+      await new Promise((r) => setTimeout(r, 30));
+      const initMsg = messages.find(
+        (m): m is { command: string; type: string; source: string; profile: string | null; text: string } =>
+          typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'init',
+      );
+      expect(initMsg).toBeDefined();
+      expect(initMsg?.type).toBe('profileJson');
+      expect(initMsg?.source).toBe('saved');
+      expect(initMsg?.profile).toBe('editable');
+
+      sendToWebview('save', {
+        target: { type: 'profileJson', source: 'saved', profile: 'editable' },
+        payload: '{\n  "agents": {\n    "sisyphus": {\n      "model": "from/profile"\n    }\n  }\n}',
+      });
+      await new Promise((r) => setTimeout(r, 30));
+      const savedMsg = messages.find(
+        (m): m is { command: string; target: unknown; text: string } =>
+          typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'saved',
+      );
+      expect(savedMsg).toBeDefined();
+      expect(savedMsg?.text).toBe('{\n  "agents": {\n    "sisyphus": {\n      "model": "from/profile"\n    }\n  }\n}\n');
+      expect(profileStore.getProfile('editable')?.agents?.sisyphus?.model).toBe('from/profile');
+      expect(readSidecar(tmpDir).profiles[0]?.agents?.sisyphus?.model).toBe('from/profile');
+
+      AgentEditorPanel.currentPanel?.dispose();
+      AgentEditorPanel.currentPanel = undefined;
+
+      const { panel: activePanel, sendToWebview: sendActive, messages: activeMessages } = makeMockWebviewPanel();
+      vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(activePanel as unknown as import('vscode').WebviewPanel);
+      AgentEditorPanel.showProfileJson(
+        makeExtensionContext(extensionPath),
+        configStore,
+        profileStore,
+        modelDiscovery,
+        treeProvider,
+      );
+      sendActive('ready');
+      await new Promise((r) => setTimeout(r, 30));
+      sendActive('save', {
+        target: { type: 'profileJson', source: 'active', profile: null },
+        payload: '{\n  "agents": {\n    "sisyphus": {\n      "model": "active/model"\n    }\n  }\n}',
+      });
+      await new Promise((r) => setTimeout(r, 30));
+
+      const activeRaw = fs.readFileSync(configPath, 'utf-8');
+      expect(activeRaw).toContain('// initial comment');
+      expect(activeRaw).toContain('"active/model"');
+      expect(configStore.getAgent('sisyphus')?.model).toBe('active/model');
+      expect(profileStore.getProfile('editable')?.agents?.sisyphus?.model).toBe('from/profile');
+
+      const freshConfigStore = new ConfigStore(tmpDir);
+      expect(freshConfigStore.getAgent('sisyphus')?.model).toBe('active/model');
+      const freshProfileStore = new ProfileStore(freshConfigStore);
+      expect(freshProfileStore.getProfile('editable')?.agents?.sisyphus?.model).toBe('from/profile');
+
+      configStore.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes the tree after import and warns on providerOptions export', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+
+      const configStore = new ConfigStore(tmpDir);
+      const profileStore = new ProfileStore(configStore);
+      await profileStore.createProfile('has-opts');
+      await profileStore.updateProfile('has-opts', {
+        agents: { sisyphus: { model: 'm', providerOptions: { key: 'value' } } },
+      });
+      const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+      const messages = makeMessageCapture();
+
+      const { panel: importPanel } = makeMockWebviewPanel();
+      vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(importPanel as unknown as import('vscode').WebviewPanel);
+      const fragmentText = JSON.stringify({ agents: { sisyphus: { model: 'imported' } } }, null, 2);
+      const ctx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          openTransferFile: async () =>
+            openedFileResult(new TextEncoder().encode(fragmentText), '/tmp/frag.json'),
+        },
+      );
+      await handleImportProfiles(ctx);
+
+      const freshTreeProvider = new AgentModelTreeProvider(new ConfigStore(tmpDir), new ProfileStore(new ConfigStore(tmpDir)));
+      const profileGroup = freshTreeProvider.getChildren().find((c) => c.kind === 'group' && c.group === 'profiles');
+      expect(profileGroup).toBeDefined();
+      const profileLeaves = freshTreeProvider.getChildren(profileGroup);
+      expect(profileLeaves.map((p) => p.nodeName)).toContain('frag');
+      expect(profileLeaves.map((p) => p.nodeName)).toContain('has-opts');
+
+      const saveCapture = makeSaveCapture();
+      let warningReturn: string | undefined = undefined;
+      const cancelCtx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          saveTransferFile: saveCapture.saveTransferFile,
+          showWarningMessage: async (message: string) => {
+            messages.warnings.push(message);
+            return warningReturn;
+          },
+        },
+      );
+      await handleExportProfile(cancelCtx, makeProfileItem('has-opts'));
+      expect(messages.warnings).toContain('This profile contains providerOptions. Export and continue?');
+      expect(saveCapture.captured.bytes).toBeUndefined();
+
+      warningReturn = 'Export';
+      const confirmCtx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          saveTransferFile: saveCapture.saveTransferFile,
+          showWarningMessage: async (message: string) => {
+            messages.warnings.push(message);
+            return warningReturn;
+          },
+        },
+      );
+      await handleExportProfile(confirmCtx, makeProfileItem('has-opts'));
+      expect(saveCapture.captured.bytes).toBeDefined();
+      expect(new TextDecoder().decode(saveCapture.captured.bytes!)).toContain('providerOptions');
+
+      configStore.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects malformed, oversized, and unsupported transfer inputs', async () => {
+    const configStore = new ConfigStore(tmpDir);
+    const profileStore = new ProfileStore(configStore);
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const cases: Array<{ bytes: Uint8Array; errorContains: string }> = [
+      { label: 'invalid JSONC', bytes: new TextEncoder().encode('{'), errorContains: 'Invalid JSONC' },
+      { label: 'root is array', bytes: new TextEncoder().encode('[]'), errorContains: 'root must be a JSON object' },
+      { label: 'mixed root', bytes: new TextEncoder().encode('{\n  "profiles": [],\n  "agents": {}\n}'), errorContains: 'A sidecar root cannot contain fragment sections' },
+      { label: 'missing sections', bytes: new TextEncoder().encode('{ "foo": 1 }'), errorContains: 'must contain agents, categories, or profiles' },
+      { label: 'duplicate key', bytes: new TextEncoder().encode('{\n  "agents": {},\n  "agents": {}\n}'), errorContains: 'duplicate JSON key' },
+      { label: 'unsupported version', bytes: new TextEncoder().encode('{\n  "version": 2,\n  "profiles": []\n}'), errorContains: 'only version 1 is supported' },
+    ];
+    for (const { bytes, errorContains } of cases) {
+      const messages = makeMessageCapture();
+      const ctx = createCommandContext(
+        configStore,
+        profileStore,
+        treeProvider,
+        extensionPath,
+        {
+          ...messages,
+          openTransferFile: async () =>
+            openedFileResult(bytes, '/tmp/case.json'),
+        },
+      );
+      await handleImportProfiles(ctx);
+      expect(messages.errors.some((m) => m.includes(errorContains))).toBe(true);
+      expect(readSidecar(tmpDir).profiles).toHaveLength(0);
+    }
+
+    const messages = makeMessageCapture();
+    const huge = new Uint8Array(MAX_PROFILE_TRANSFER_BYTES + 1);
+    const ctx = createCommandContext(
+      configStore,
+      profileStore,
+      treeProvider,
+      extensionPath,
+      {
+        ...messages,
+        openTransferFile: async () => openedFileResult(huge, '/tmp/huge.json'),
+      },
+    );
+    await handleImportProfiles(ctx);
+    expect(messages.errors.some((m) => /exceeds/.test(m))).toBe(true);
+    expect(readSidecar(tmpDir).profiles).toHaveLength(0);
+
+    configStore.dispose();
+  });
+
+  it('reports file-open and file-save errors without mutation', async () => {
+    const configStore = new ConfigStore(tmpDir);
+    const profileStore = new ProfileStore(configStore);
+    await profileStore.createProfile('x');
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    const messages = makeMessageCapture();
+
+    const openErr = createCommandContext(
+      configStore,
+      profileStore,
+      treeProvider,
+      extensionPath,
+      {
+        ...messages,
+        openTransferFile: async () => ({ status: 'error', error: { message: 'disk full' } } as TransferFileResult<OpenedTransferFile>),
+      },
+    );
+    await handleImportProfiles(openErr);
+    expect(messages.errors).toContain('Import failed: disk full');
+    expect(readSidecar(tmpDir).profiles.map((p) => p.name)).toEqual(['x']);
+
+    const saveErr = async (): Promise<TransferFileResult<import('vscode').Uri>> =>
+      ({ status: 'error', error: { message: 'no space' } } as TransferFileResult<import('vscode').Uri>);
+    const exportErr = createCommandContext(
+      configStore,
+      profileStore,
+      treeProvider,
+      extensionPath,
+      { ...messages, saveTransferFile: saveErr },
+    );
+    await handleExportProfile(exportErr, makeProfileItem('x'));
+    expect(messages.errors).toContain('Export failed: no space');
+
+    const allExportErr = createCommandContext(
+      configStore,
+      profileStore,
+      treeProvider,
+      extensionPath,
+      { ...messages, saveTransferFile: saveErr },
+    );
+    await handleExportAllProfiles(allExportErr);
+    expect(messages.errors).toContain('Export failed: no space');
+
+    configStore.dispose();
+  });
+
+  it('reports active-saved-profile second-write failure and leaves config updated, sidecar old', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
+
+      const configStore = new ConfigStore(tmpDir);
+      const profileStore = new ProfileStore(configStore);
+      await profileStore.createProfile('active');
+      await profileStore.activateProfile('active');
+      const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+      const modelDiscovery = new ModelDiscovery(stubExecutor([]) as never, extensionPath);
+
+      const { panel, sendToWebview, messages } = makeMockWebviewPanel();
+      vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+      const spy = vi.spyOn(profileStore, 'saveActiveConfigToProfile').mockRejectedValueOnce(new Error('sidecar locked'));
+
+      AgentEditorPanel.showProfileJson(
+        makeExtensionContext(extensionPath),
+        configStore,
+        profileStore,
+        modelDiscovery,
+        treeProvider,
+        'active',
+      );
+      sendToWebview('ready');
+      await new Promise((r) => setTimeout(r, 30));
+      sendToWebview('save', {
+        target: { type: 'profileJson', source: 'saved', profile: 'active' },
+        payload: '{\n  "agents": {\n    "sisyphus": {\n      "model": "updated"\n    }\n  }\n}',
+      });
+      await new Promise((r) => setTimeout(r, 30));
+
+      const errorMsg = messages.find(
+        (m): m is { command: string; message: string } =>
+          typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'error',
+      );
+      expect(errorMsg).toBeDefined();
+      expect(errorMsg?.message).toContain('Saved to active config but failed to snapshot profile');
+      expect(errorMsg?.message).toContain('sidecar locked');
+      expect(configStore.getAgent('sisyphus')?.model).toBe('updated');
+      expect(fs.readFileSync(configPath, 'utf-8')).toContain('"updated"');
+      expect(readSidecar(tmpDir).profiles[0]?.agents?.sisyphus?.model).toBe('old/model');
+      expect(profileStore.isActiveProfileModified()).toBe(true);
+
+      spy.mockRestore();
+      configStore.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
 });
