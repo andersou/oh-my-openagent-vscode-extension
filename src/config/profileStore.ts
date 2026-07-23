@@ -5,10 +5,21 @@ import { ConfigStore } from './configStore.js';
 import type {
   AgentConfig,
   CategoryConfig,
+  ImportProfilesResult,
   Profile,
   ProfilesFile,
   OmOConfig,
 } from './schema.js';
+import type {
+  NormalizedProfilesFile,
+  ProfileFragment,
+} from './profileValidation.js';
+import {
+  cloneProfileFragment,
+  cloneProfilesFile,
+  deriveProfileNameFromSource,
+  resolveProfileNameCollisions,
+} from './profileTransferSerialization.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -376,6 +387,101 @@ export class ProfileStore {
     const data = this.readProfilesFile();
     data.lastActiveProfile = name;
     await this.writeProfilesFile(data);
+  }
+
+
+
+  /**
+   * Import a single normalized profile fragment as a new profile.
+   *
+   * The profile name is derived from the supplied filename by stripping the
+   * transfer extensions and trimming whitespace. Exact case-sensitive name
+   * collisions against existing sidecar profiles are resolved in source order
+   * with `-2`, `-3`, etc. The live config is never touched.
+   */
+  async importSingleProfile(
+    fragment: ProfileFragment,
+    filename?: string,
+  ): Promise<Profile> {
+    const sourceName = deriveProfileNameFromSource(filename ?? '');
+    const data = this.readProfilesFile();
+    const existingNames = data.profiles.map((p) => p.name);
+    const [resolvedName] = resolveProfileNameCollisions(existingNames, [
+      sourceName,
+    ]);
+
+    const now = new Date().toISOString();
+    const clone = cloneProfileFragment(fragment);
+    const profile: Profile = {
+      name: resolvedName,
+      agents: clone.agents,
+      categories: clone.categories,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    data.profiles.push(profile);
+    await this.writeProfilesFile(data);
+
+    return profile;
+  }
+
+  /**
+   * Import a normalized full sidecar into the local sidecar file.
+   *
+   * `replace` overwrites the local profile list with the imported profiles,
+   * preserving their imported timestamps. `extend` appends the imported
+   * profiles, resolving name collisions in source order against both existing
+   * sidecar names and names already allocated during this import, and only
+   * bumps `updatedAt` when the final name differs from the imported name.
+   *
+   * The imported `lastActiveProfile` is always ignored; the local marker is
+   * preserved only when a profile with that exact name still exists after the
+   * import. Exactly one sidecar write and one `change` event are emitted. The
+   * live OmO config is never modified.
+   */
+  async importProfiles(
+    sidecar: NormalizedProfilesFile,
+    mode: 'extend' | 'replace',
+  ): Promise<ImportProfilesResult> {
+    const data = this.readProfilesFile();
+    const imported = cloneProfilesFile(sidecar).profiles;
+
+    const existingNames =
+      mode === 'extend' ? data.profiles.map((p) => p.name) : [];
+    const importedNames = imported.map((p) => p.name);
+    const resolvedNames = resolveProfileNameCollisions(existingNames, importedNames);
+
+    const now = new Date().toISOString();
+    for (let i = 0; i < imported.length; i++) {
+      const profile = imported[i];
+      const resolvedName = resolvedNames[i];
+      profile.name = resolvedName;
+      if (resolvedName !== importedNames[i]) {
+        profile.updatedAt = now;
+      }
+    }
+
+    if (mode === 'replace') {
+      data.profiles = imported;
+    } else {
+      data.profiles.push(...imported);
+    }
+
+    if (
+      data.lastActiveProfile !== undefined &&
+      !data.profiles.some((p) => p.name === data.lastActiveProfile)
+    ) {
+      delete data.lastActiveProfile;
+    }
+
+    await this.writeProfilesFile(data);
+
+    return {
+      mode,
+      added: imported.length,
+      importedNames: resolvedNames,
+    };
   }
 
   /**

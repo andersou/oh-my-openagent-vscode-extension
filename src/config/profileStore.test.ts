@@ -4,6 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { ConfigStore } from './configStore.js';
 import { ProfileStore } from './profileStore.js';
+import type { ProfileFragment, NormalizedProfilesFile } from './profileValidation.js';
+import type { ImportProfilesResult, Profile } from './schema.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -703,24 +705,287 @@ describe('ProfileStore', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Persistence round-trip
+  // importSingleProfile
   // -----------------------------------------------------------------------
 
-  describe('persistence', () => {
-    it('survives a fresh ProfileStore instance (re-reads from disk)', async () => {
+  describe('importSingleProfile', () => {
+    it('imports a single fragment and derives the name from the filename', async () => {
       setupWithConfig(CONFIG_MINIMAL);
-      await profileStore.createProfile('persist');
-      await profileStore.activateProfile('persist');
+      const fragment: ProfileFragment = {
+        agents: { sisyphus: { model: 'imported/model' } },
+      };
 
-      // Create a fresh store pair pointing at the same directory
-      const store2 = new ConfigStore(tmpDir);
-      const profiles2 = new ProfileStore(store2);
+      const profile = await profileStore.importSingleProfile(
+        fragment,
+        'my-cool.profile.jsonc',
+      );
 
-      expect(profiles2.listProfiles()).toHaveLength(1);
-      expect(profiles2.getProfile('persist')).toBeDefined();
-      expect(profiles2.getActiveProfileName()).toBe('persist');
+      expect(profile.name).toBe('my-cool');
+      expect(profile.agents?.sisyphus?.model).toBe('imported/model');
+      expect(profile.createdAt).toBe(profile.updatedAt);
+      expect(profileStore.getProfile('my-cool')).toBeDefined();
+    });
 
-      store2.dispose();
+    it('trims Unicode whitespace and falls back to imported-profile', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const fragment: ProfileFragment = { categories: { quick: { model: 'q' } } };
+
+      const profile = await profileStore.importSingleProfile(fragment, '   \t\n ');
+
+      expect(profile.name).toBe('imported-profile');
+      expect(profile.categories?.quick?.model).toBe('q');
+    });
+
+    it('resolves collisions against existing sidecar names in source order', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('collision');
+
+      const p1 = await profileStore.importSingleProfile(
+        { agents: { sisyphus: { model: 'a' } } },
+        'collision.json',
+      );
+      const p2 = await profileStore.importSingleProfile(
+        { agents: { sisyphus: { model: 'b' } } },
+        'collision.json', // exact case-sensitive collision
+      );
+      const p3 = await profileStore.importSingleProfile(
+        { agents: { sisyphus: { model: 'c' } } },
+        'collision.jsonc',
+      );
+
+      expect(p1.name).toBe('collision-2');
+      expect(p2.name).toBe('collision-3');
+      expect(p3.name).toBe('collision-4');
+    });
+
+    it('strips extensions case-insensitively and path segments', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+
+      const profile = await profileStore.importSingleProfile(
+        { agents: { sisyphus: { model: 'x' } } },
+        '/some/path/Foo.PROFILE.JSON',
+      );
+
+      expect(profile.name).toBe('Foo');
+    });
+
+    it('emits exactly one change event and writes the sidecar once', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.importSingleProfile(
+        { agents: { sisyphus: { model: 'x' } } },
+        'one.json',
+      );
+
+      expect(changes).toBe(1);
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles).toHaveLength(1);
+    });
+
+    it('clones the input fragment so callers cannot mutate the stored profile', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const fragment: ProfileFragment = {
+        agents: { sisyphus: { model: 'before' } },
+      };
+
+      await profileStore.importSingleProfile(fragment, 'clone.json');
+      fragment.agents!.sisyphus!.model = 'after';
+
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles[0].agents.sisyphus.model).toBe('before');
+    });
+
+    it('does not modify the live OmO config', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+
+      await profileStore.importSingleProfile(
+        { agents: { sisyphus: { model: 'imported' } } },
+        'imported.json',
+      );
+
+      expect(configStore.getAgent('sisyphus')?.model).toBe('minimal/model');
+      expect(readConfig(configPath)).toContain('minimal/model');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // importProfiles
+  // -----------------------------------------------------------------------
+
+  describe('importProfiles', () => {
+    function makeSidecar(
+      profiles: Profile[],
+      lastActiveProfile?: string,
+    ): NormalizedProfilesFile {
+      return {
+        version: 1,
+        profiles,
+        ...(lastActiveProfile !== undefined ? { lastActiveProfile } : {}),
+      };
+    }
+
+    function makeProfile(
+      name: string,
+      agents: Record<string, { model: string }>,
+    ): Profile {
+      return {
+        name,
+        agents,
+        createdAt: '2020-01-01T00:00:00.000Z',
+        updatedAt: '2020-01-02T00:00:00.000Z',
+      };
+    }
+
+    it('extends with no collisions and preserves imported timestamps', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const existing = await profileStore.createProfile('local');
+      const sidecar = makeSidecar([makeProfile('alpha', { sisyphus: { model: 'a' } })]);
+
+      const result = await profileStore.importProfiles(sidecar, 'extend');
+
+      expect(result.mode).toBe('extend');
+      expect(result.added).toBe(1);
+      expect(result.importedNames).toEqual(['alpha']);
+      const profiles = profileStore.listProfiles();
+      expect(profiles).toHaveLength(2);
+      expect(profiles[0].name).toBe('local');
+      expect(profiles[1].name).toBe('alpha');
+      expect(profiles[1].createdAt).toBe('2020-01-01T00:00:00.000Z');
+      expect(profiles[1].updatedAt).toBe('2020-01-02T00:00:00.000Z');
+    });
+
+    it('extends resolving collisions against existing and already-allocated names', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('alpha');
+      await profileStore.createProfile('alpha-2');
+      const sidecar = makeSidecar([
+        makeProfile('alpha', { sisyphus: { model: 'a' } }),
+        makeProfile('alpha', { sisyphus: { model: 'b' } }),
+      ]);
+
+      const result = await profileStore.importProfiles(sidecar, 'extend');
+
+      expect(result.importedNames).toEqual(['alpha-3', 'alpha-4']);
+      const names = profileStore.listProfiles().map((p) => p.name);
+      expect(names).toEqual(['alpha', 'alpha-2', 'alpha-3', 'alpha-4']);
+    });
+
+    it('bumps updatedAt only when the final name differs from the imported name', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('alpha');
+      const sidecar = makeSidecar([
+        makeProfile('alpha', { sisyphus: { model: 'a' } }),
+        makeProfile('beta', { sisyphus: { model: 'b' } }),
+      ]);
+
+      await profileStore.importProfiles(sidecar, 'extend');
+
+      const profiles = profileStore.listProfiles();
+      const alpha2 = profiles.find((p) => p.name === 'alpha-2')!;
+      const beta = profiles.find((p) => p.name === 'beta')!;
+      expect(alpha2.createdAt).not.toBe(alpha2.updatedAt); // bumped because renamed
+      expect(beta.createdAt).toBe('2020-01-01T00:00:00.000Z');
+      expect(beta.updatedAt).toBe('2020-01-02T00:00:00.000Z'); // unchanged
+    });
+
+    it('replaces the entire profiles list and preserves imported timestamps', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('old');
+      const sidecar = makeSidecar([makeProfile('alpha', { sisyphus: { model: 'a' } })]);
+
+      const result = await profileStore.importProfiles(sidecar, 'replace');
+
+      expect(result.mode).toBe('replace');
+      expect(result.added).toBe(1);
+      expect(result.importedNames).toEqual(['alpha']);
+      expect(profileStore.listProfiles()).toHaveLength(1);
+      expect(profileStore.getProfile('old')).toBeUndefined();
+      expect(profileStore.getProfile('alpha')).toBeDefined();
+    });
+
+    it('ignores the imported lastActiveProfile and preserves the local one when it still exists', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('keep');
+      await profileStore.activateProfile('keep');
+      expect(profileStore.getActiveProfileName()).toBe('keep');
+      const sidecar = makeSidecar(
+        [makeProfile('remote', { sisyphus: { model: 'r' } })],
+        'remote',
+      );
+
+      await profileStore.importProfiles(sidecar, 'extend');
+
+      expect(profileStore.getActiveProfileName()).toBe('keep');
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.lastActiveProfile).toBe('keep');
+    });
+
+    it('clears the local lastActiveProfile when its profile no longer exists after replace', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('gone');
+      await profileStore.activateProfile('gone');
+      expect(profileStore.getActiveProfileName()).toBe('gone');
+      const sidecar = makeSidecar([makeProfile('alpha', { sisyphus: { model: 'a' } })]);
+
+      await profileStore.importProfiles(sidecar, 'replace');
+
+      expect(profileStore.getActiveProfileName()).toBeUndefined();
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.lastActiveProfile).toBeUndefined();
+    });
+
+    it('emits exactly one change event and writes the sidecar once', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+      const sidecar = makeSidecar([makeProfile('alpha', { sisyphus: { model: 'a' } })]);
+
+      await profileStore.importProfiles(sidecar, 'extend');
+
+      expect(changes).toBe(1);
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles).toHaveLength(1);
+    });
+
+    it('clones the sidecar input so callers cannot mutate stored profiles', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const sidecar = makeSidecar([makeProfile('alpha', { sisyphus: { model: 'a' } })]);
+
+      await profileStore.importProfiles(sidecar, 'extend');
+      sidecar.profiles[0].agents!.sisyphus!.model = 'mutated';
+
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles[0].agents.sisyphus.model).toBe('a');
+    });
+
+    it('does not modify the live OmO config on extend or replace', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const sidecar = makeSidecar([makeProfile('alpha', { sisyphus: { model: 'imported' } })]);
+
+      await profileStore.importProfiles(sidecar, 'extend');
+      expect(configStore.getAgent('sisyphus')?.model).toBe('minimal/model');
+      expect(readConfig(configPath)).toContain('minimal/model');
+
+      await profileStore.importProfiles(sidecar, 'replace');
+      expect(configStore.getAgent('sisyphus')?.model).toBe('minimal/model');
+      expect(readConfig(configPath)).toContain('minimal/model');
+    });
+
+    it('preserves the local lastActiveProfile when replaced set contains that exact name', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('alpha');
+      await profileStore.activateProfile('alpha');
+      const sidecar = makeSidecar([makeProfile('alpha', { sisyphus: { model: 'a' } })]);
+
+      await profileStore.importProfiles(sidecar, 'replace');
+
+      expect(profileStore.getActiveProfileName()).toBe('alpha');
     });
   });
 });
