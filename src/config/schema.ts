@@ -136,6 +136,12 @@ export interface Profile {
   updatedAt?: string;
 }
 
+export interface ImportProfilesResult {
+  mode: 'extend' | 'replace';
+  added: number;
+  importedNames: string[];
+}
+
 export interface ProfilesFile {
   profiles: Profile[];
   lastActiveProfile?: string;
