@@ -280,4 +280,10 @@ export function parseProfileTransfer(
   };
 }
 
-export const parseProfileTransferBytes = parseProfileTransfer;
+/** Parse a transfer payload from a UTF-8 string or byte array. */
+export function parseProfileTransferBytes(
+  input: string | Uint8Array,
+): ProfileTransferParseResult {
+  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;
+  return parseProfileTransfer(bytes);
+}
