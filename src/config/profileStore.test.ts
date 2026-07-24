@@ -1086,6 +1086,8 @@ describe('ProfileStore', () => {
     });
   });
 
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   describe('replaceProfileFragment', () => {
     it('replaces only the agents and categories of the named profile', async () => {
       // Given: a profile with metadata and existing agents/categories
@@ -1095,6 +1097,9 @@ describe('ProfileStore', () => {
         categories: { deep: { model: 'old/category' } },
       });
       const originalCreatedAt = original.createdAt;
+
+      // Wait briefly to ensure updatedAt strictly advances (ms-resolution ISO timestamps)
+      await sleep(2);
 
       // When: replacing the fragment
       const fragment: ProfileFragment = {
