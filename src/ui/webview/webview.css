@@ -50,6 +50,9 @@ html, body {
 .field__input:focus { border-color: var(--vscode-focusBorder); outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .field__input:disabled { opacity: .55; cursor: not-allowed; }
 .field__input.is-invalid { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
+.field__textarea { width: 100%; min-width: 0; padding: 4px 8px; resize: vertical; border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; outline: none; color: var(--vscode-input-foreground); background: var(--vscode-input-background); font: inherit; line-height: 1.4; }
+.field__textarea:focus { border-color: var(--vscode-focusBorder); outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.field__textarea--code { font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 12px; }
 .field__error { margin: 0; color: var(--vscode-errorForeground); font-size: 11px; }
 .field__checkbox-row { display: flex; align-items: center; gap: 8px; color: var(--vscode-foreground); font-size: 12px; }
 .field__checkbox { width: 16px; height: 16px; margin: 0; accent-color: var(--vscode-focusBorder); }

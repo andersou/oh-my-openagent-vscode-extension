@@ -41,7 +41,6 @@ describe('package.json command contributions', () => {
       'ohMyOpenAgent.editAgent',
       'ohMyOpenAgent.editCategory',
       'ohMyOpenAgent.refresh',
-      'ohMyOpenAgent.removeOverride',
       'ohMyOpenAgent.createProfile',
       'ohMyOpenAgent.activateProfile',
       'ohMyOpenAgent.renameProfile',
@@ -65,6 +64,7 @@ describe('package.json command contributions', () => {
       'ohMyOpenAgent.addAgentOverride',
       'ohMyOpenAgent.addCategoryOverride',
       'ohMyOpenAgent.switchMainModel',
+      'ohMyOpenAgent.removeOverride',
     ]);
 
     expect(
@@ -84,7 +84,6 @@ describe('package.json command contributions', () => {
     expect(entries).toEqual([
       { command: 'ohMyOpenAgent.editAgent', when: 'false' },
       { command: 'ohMyOpenAgent.editCategory', when: 'false' },
-      { command: 'ohMyOpenAgent.removeOverride', when: 'false' },
       { command: 'ohMyOpenAgent.activateProfile', when: 'false' },
       { command: 'ohMyOpenAgent.renameProfile', when: 'false' },
       { command: 'ohMyOpenAgent.duplicateProfile', when: 'false' },
@@ -98,7 +97,7 @@ describe('package.json command contributions', () => {
 });
 
 describe('package.json view/item/context menus', () => {
-  it('wires edit and remove commands for override agent items', () => {
+  it('wires edit commands for override agent items', () => {
     const entries = readPackageJson().contributes?.menus?.['view/item/context'] ?? [];
 
     expect(entries).toEqual(
@@ -108,16 +107,11 @@ describe('package.json view/item/context menus', () => {
           when:
             'view == ohMyOpenAgent.models && (viewItem == agent || viewItem == agentOverride)',
         }),
-        expect.objectContaining({
-          command: 'ohMyOpenAgent.removeOverride',
-          when:
-            'view == ohMyOpenAgent.models && (viewItem == agentOverride || viewItem == categoryOverride)',
-        }),
       ]),
     );
   });
 
-  it('wires edit and remove commands for override category items', () => {
+  it('wires edit commands for override category items', () => {
     const entries = readPackageJson().contributes?.menus?.['view/item/context'] ?? [];
 
     expect(entries).toEqual(
@@ -126,11 +120,6 @@ describe('package.json view/item/context menus', () => {
           command: 'ohMyOpenAgent.editCategory',
           when:
             'view == ohMyOpenAgent.models && (viewItem == category || viewItem == categoryOverride)',
-        }),
-        expect.objectContaining({
-          command: 'ohMyOpenAgent.removeOverride',
-          when:
-            'view == ohMyOpenAgent.models && (viewItem == agentOverride || viewItem == categoryOverride)',
         }),
       ]),
     );

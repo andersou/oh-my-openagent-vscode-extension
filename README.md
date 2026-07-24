@@ -112,7 +112,7 @@ Right-click items in the Models view for more options:
 
 - On a built-in agent: `Edit Agent` opens the editor. Saving creates the agent override.
 - On a built-in category: `Edit Category` opens the editor. Saving creates the category override.
-- On an override item: `Edit Agent` / `Edit Category` opens the editor, and `Remove Override` deletes that override from the active config.
+- On an override item: `Edit Agent` / `Edit Category` opens the editor.
 - On a profile: `Activate`, `Rename`, `Duplicate`, `Delete`, `Export Profile`, or `Edit Profile JSON`.
 - Profile-contained agent/category leaves reuse the same `Edit Agent` / `Edit Category` commands as the main tree.
 - On a modified active profile: `Save Active Profile` snapshots the current config back into that profile.
@@ -122,7 +122,7 @@ The view title also provides `Refresh`, `Create Profile`, `Import Profiles`, and
 
 ## Commands
 
-The extension contributes 16 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
+The extension contributes 15 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
 
 | Command | Availability | What it does |
 | --- | --- | --- |
@@ -130,7 +130,6 @@ The extension contributes 16 commands. All are prefixed with **Oh My OpenAgent**
 | `Edit Agent` | Contextual | Opens the editor for the selected agent. |
 | `Edit Category` | Contextual | Opens the editor for the selected category. |
 | `Refresh` | Command Palette and view title | Refreshes the Models tree from disk. |
-| `Remove Override` | Contextual | Removes the override for the selected agent or category. |
 | `Create Profile` | Command Palette and view title | Creates a new profile from the current config. |
 | `Activate Profile` | Contextual | Applies the selected profile to the active config. |
 | `Rename Profile` | Contextual | Renames the selected profile. |
@@ -235,7 +234,7 @@ The extension follows a clean layered architecture with strict separation of con
 ```
 extension.ts  (activation orchestrator)
      |
-     ├── commands.ts  (16 command registrations)
+     ├── commands.ts  (15 command registrations)
      |
      ├── profileTransferCommands.ts  (import/export/JSON-edit handlers)
      │   ├── profileTransferCommandHandlers.ts
@@ -317,7 +316,7 @@ Tests are written with Vitest. The suite covers the extension's main behaviors:
 | `profileTransferFiles.test.ts` | VS Code open/save dialog helpers and successful transfer-file operations |
 | `profileTransferFiles.rejections.test.ts` | Primitive rejection contract for transfer-file dialog failures |
 | `smoke.test.ts` | End-to-end editor saves across stores, panel, tree, JSONC writes, profile transfer round-trips, and JSON editing |
-| `packageMenus.test.ts` | The 16-command contribution surface and contextual menu visibility |
+| `packageMenus.test.ts` | The 15-command contribution surface and contextual menu visibility |
 | `configStore.test.ts` | Config discovery, JSONC parsing, formatting-preserving updates, key removal, and file watching |
 | `modelRouting.test.ts` | Ordered-card promotion, shared defaults, fallback inheritance and overrides, serialization, removal, and session-bound routing intent |
 | `modelCapabilities.test.ts` | Capability validation for effective inherited and overridden settings |

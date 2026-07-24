@@ -60,11 +60,6 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "ohMyOpenAgent.removeOverride",
-        "title": "Remove Override",
-        "category": "Oh My OpenAgent"
-      },
-      {
         "command": "ohMyOpenAgent.createProfile",
         "title": "Create Profile",
         "category": "Oh My OpenAgent"
@@ -136,11 +131,6 @@
           "group": "inline"
         },
         {
-          "command": "ohMyOpenAgent.removeOverride",
-          "when": "view == ohMyOpenAgent.models && (viewItem == agentOverride || viewItem == categoryOverride)",
-          "group": "override"
-        },
-        {
           "command": "ohMyOpenAgent.activateProfile",
           "when": "view == ohMyOpenAgent.models && viewItem == profile",
           "group": "profile"
@@ -188,10 +178,6 @@
         },
         {
           "command": "ohMyOpenAgent.editCategory",
-          "when": "false"
-        },
-        {
-          "command": "ohMyOpenAgent.removeOverride",
           "when": "false"
         },
         {

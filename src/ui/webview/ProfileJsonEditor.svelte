@@ -126,6 +126,7 @@
       <textarea
         id="profile-json-text"
         class="field__textarea field__textarea--code"
+        rows="14"
         aria-describedby="profile-json-help"
         spellcheck="false"
         autocapitalize="off"

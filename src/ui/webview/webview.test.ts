@@ -1201,6 +1201,17 @@ describe('profile JSON editor', () => {
     expect(label).not.toBeNull();
   });
 
+  it('renders the textarea with an initial height of 14 rows', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{"agents":{}}' });
+    await window.happyDOM.waitUntilComplete();
+
+    const textarea = getTextarea();
+    expect(textarea.getAttribute('rows')).toBe('14');
+    expect(textarea.classList.contains('field__textarea')).toBe(true);
+    expect(textarea.classList.contains('field__textarea--code')).toBe(true);
+  });
+
   it('renders the saved profile JSON heading', async () => {
     const { window } = env;
     window.postMessage({ command: 'init', type: 'profileJson', source: 'saved', profile: 'fast', text: '{"categories":{}}' });

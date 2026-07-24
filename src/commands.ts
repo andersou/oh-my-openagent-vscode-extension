@@ -39,7 +39,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Register all 16 commands declared in `package.json` and return a single
+ * Register all 15 commands declared in `package.json` and return a single
  * `Disposable` that unregisters them all. The activation code pushes the
  * returned value into `context.subscriptions`.
  */
@@ -114,33 +114,7 @@ export function registerCommands(
       treeProvider.refresh();
     }),
 
-    // 5. Delete the override key for an agent or category.
-    vscode.commands.registerCommand(
-      'ohMyOpenAgent.removeOverride',
-      async (item: AgentModelTreeItem | undefined) => {
-        if (!isOverrideItem(item)) {
-          void vscode.window.showWarningMessage(
-            'Select an overridden agent or category first.',
-          );
-          return;
-        }
-        const name = item.nodeName;
-        const group = item.group;
-        try {
-          await configStore.updateConfig((draft) => {
-            if (group === 'agents' && draft.agents) {
-              delete draft.agents[name];
-            } else if (group === 'categories' && draft.categories) {
-              delete draft.categories[name];
-            }
-          });
-        } catch (err) {
-          reportError('Failed to remove override', err);
-        }
-      },
-    ),
-
-    // 6. Create a new profile by snapshotting the current config.
+    // 5. Create a new profile by snapshotting the current config.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.createProfile',
       async () => {
@@ -344,24 +318,6 @@ function isCategoryLikeItem(
     item !== undefined &&
     item.group === 'categories' &&
     (item.kind === 'category' || item.kind === 'override') &&
-    typeof item.nodeName === 'string' &&
-    item.nodeName.length > 0
-  );
-}
-
-/**
- * An override leaf — `kind === 'override'`, but we also re-check the group
- * because the override kind is shared between the agents and categories
- * groups. The group tells us which map (`agents` vs `categories`) to delete
- * the key from.
- */
-function isOverrideItem(
-  item: AgentModelTreeItem | undefined,
-): item is AgentModelTreeItem & { nodeName: string } {
-  return (
-    item !== undefined &&
-    item.kind === 'override' &&
-    (item.group === 'agents' || item.group === 'categories') &&
     typeof item.nodeName === 'string' &&
     item.nodeName.length > 0
   );
