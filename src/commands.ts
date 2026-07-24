@@ -29,13 +29,17 @@ import type {
   AgentModelTreeProvider,
 } from './ui/agentModelTreeProvider.js';
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
+import {
+  createProfileTransferCommandContext,
+  registerProfileTransferCommands,
+} from './profileTransferCommands.js';
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Register all 11 commands declared in `package.json` and return a single
+ * Register all 16 commands declared in `package.json` and return a single
  * `Disposable` that unregisters them all. The activation code pushes the
  * returned value into `context.subscriptions`.
  */
@@ -281,30 +285,34 @@ export function registerCommands(
       },
     ),
 
-    // 11. Snapshot the live config back into the active profile.
-    vscode.commands.registerCommand(
-      'ohMyOpenAgent.saveActiveProfile',
-      async () => {
-        const active = profileStore.getActiveProfileName();
-        if (active === undefined) {
-          void vscode.window.showWarningMessage(
-            'No active profile to save into. Activate a profile first.',
-          );
-          return;
-        }
-        try {
-          await profileStore.saveActiveConfigToProfile();
-          void vscode.window.showInformationMessage(
-            `Profile "${active}" updated from the active config.`,
-          );
-        } catch (err) {
-          reportError('Failed to save active profile', err);
-        }
-      },
-    ),
-  ];
+  // 11. Snapshot the live config back into the active profile.
+  vscode.commands.registerCommand(
+    'ohMyOpenAgent.saveActiveProfile',
+    async () => {
+      const active = profileStore.getActiveProfileName();
+      if (active === undefined) {
+        void vscode.window.showWarningMessage(
+          'No active profile to save into. Activate a profile first.',
+        );
+        return;
+      }
+      try {
+        await profileStore.saveActiveConfigToProfile();
+        void vscode.window.showInformationMessage(
+          `Profile "${active}" updated from the active config.`,
+        );
+      } catch (err) {
+        reportError('Failed to save active profile', err);
+      }
+    },
+  ),
+];
 
-  return vscode.Disposable.from(...commands);
+const profileTransferCommands = registerProfileTransferCommands(
+  createProfileTransferCommandContext(context, configStore, profileStore, modelDiscovery, treeProvider),
+);
+
+return vscode.Disposable.from(...commands, profileTransferCommands);
 }
 
 // ---------------------------------------------------------------------------

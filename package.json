@@ -94,6 +94,33 @@
         "title": "Save Active Profile",
         "category": "Oh My OpenAgent",
         "icon": "$(save)"
+      },
+      {
+        "command": "ohMyOpenAgent.importProfiles",
+        "title": "Import Profiles",
+        "category": "Oh My OpenAgent",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "ohMyOpenAgent.exportAllProfiles",
+        "title": "Export All Profiles",
+        "category": "Oh My OpenAgent",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "ohMyOpenAgent.exportProfile",
+        "title": "Export Profile",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.editProfileJson",
+        "title": "Edit Profile JSON",
+        "category": "Oh My OpenAgent"
+      },
+      {
+        "command": "ohMyOpenAgent.editActiveProfileJson",
+        "title": "Edit Active Profile JSON",
+        "category": "Oh My OpenAgent"
       }
     ],
     "menus": {
@@ -129,6 +156,16 @@
           "group": "profile"
         },
         {
+          "command": "ohMyOpenAgent.exportProfile",
+          "when": "view == ohMyOpenAgent.models && viewItem == profile",
+          "group": "profile"
+        },
+        {
+          "command": "ohMyOpenAgent.editProfileJson",
+          "when": "view == ohMyOpenAgent.models && viewItem == profile",
+          "group": "profile"
+        },
+        {
           "command": "ohMyOpenAgent.deleteProfile",
           "when": "view == ohMyOpenAgent.models && viewItem == profile",
           "group": "profile"
@@ -136,6 +173,11 @@
         {
           "command": "ohMyOpenAgent.saveActiveProfile",
           "when": "view == ohMyOpenAgent.models && viewItem == activeProfileModified",
+          "group": "inline"
+        },
+        {
+          "command": "ohMyOpenAgent.editActiveProfileJson",
+          "when": "view == ohMyOpenAgent.models && viewItem == configFile",
           "group": "inline"
         }
       ],
@@ -171,6 +213,18 @@
         {
           "command": "ohMyOpenAgent.saveActiveProfile",
           "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.exportProfile",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.editProfileJson",
+          "when": "false"
+        },
+        {
+          "command": "ohMyOpenAgent.editActiveProfileJson",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -181,6 +235,16 @@
         },
         {
           "command": "ohMyOpenAgent.createProfile",
+          "when": "view == ohMyOpenAgent.models",
+          "group": "navigation"
+        },
+        {
+          "command": "ohMyOpenAgent.importProfiles",
+          "when": "view == ohMyOpenAgent.models",
+          "group": "navigation"
+        },
+        {
+          "command": "ohMyOpenAgent.exportAllProfiles",
           "when": "view == ohMyOpenAgent.models",
           "group": "navigation"
         }

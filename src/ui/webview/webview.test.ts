@@ -1021,6 +1021,23 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(messages.some((message) => typeof message === 'object' && message !== null && 'command' in message && message.command === 'save')).toBe(true);
   });
 
+  function lastStateForTarget(states: unknown[], target: Record<string, unknown>) {
+    const state = states.at(-1);
+    if (
+      typeof state !== 'object' ||
+      state === null ||
+      (state as { v?: unknown }).v !== 1 ||
+      typeof (state as { targets?: unknown }).targets !== 'object' ||
+      (state as { targets?: unknown }).targets === null
+    ) {
+      return null;
+    }
+    const key = JSON.stringify(target);
+    const found = (state as { targets: Record<string, unknown> }).targets[key];
+    if (typeof found !== 'object' || found === null) return null;
+    return found as Record<string, unknown>;
+  }
+
   it('marks collapsed fallback capability errors and keeps dirty state after a host error', async () => {
     const { window, states } = env;
     window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'main', temperature: 0.4, fallback_models: ['no-temp'] } });
@@ -1035,8 +1052,8 @@ describe('webview lazy model picker (end-to-end)', () => {
     (window.document.getElementById('btn-save') as HTMLButtonElement).click();
     window.postMessage({ command: 'error', message: 'save failed' });
     await window.happyDOM.waitUntilComplete();
-    const state = states.at(-1) as { dirty?: boolean };
-    expect(state.dirty).toBe(true);
+    const targetState = lastStateForTarget(states, { type: 'agent', name: 'sisyphus', profile: null });
+    expect(targetState?.dirty).toBe(true);
   });
 
   it('uses target-aware dirty and save messages, retaining dirty state until a matching acknowledgement', async () => {
@@ -1060,14 +1077,15 @@ describe('webview lazy model picker (end-to-end)', () => {
       target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
       dirty: true,
     });
-    expect((states.at(-1) as { profile?: string }).profile).toBe('fast');
+    const targetState = lastStateForTarget(states, { type: 'agent', name: 'sisyphus', profile: 'fast' });
+    expect(targetState?.profile).toBe('fast');
 
     window.postMessage({
       command: 'saved',
       target: { type: 'agent', name: 'sisyphus', profile: 'careful' },
     });
     await window.happyDOM.waitUntilComplete();
-    expect((states.at(-1) as { dirty?: boolean }).dirty).toBe(true);
+    expect(lastStateForTarget(states, { type: 'agent', name: 'sisyphus', profile: 'fast' })?.dirty).toBe(true);
 
     window.postMessage({
       command: 'error',
@@ -1075,14 +1093,14 @@ describe('webview lazy model picker (end-to-end)', () => {
       target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
     });
     await window.happyDOM.waitUntilComplete();
-    expect((states.at(-1) as { dirty?: boolean }).dirty).toBe(true);
+    expect(lastStateForTarget(states, { type: 'agent', name: 'sisyphus', profile: 'fast' })?.dirty).toBe(true);
 
     window.postMessage({
       command: 'saved',
       target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
     });
     await window.happyDOM.waitUntilComplete();
-    expect((states.at(-1) as { dirty?: boolean }).dirty).toBe(false);
+    expect(lastStateForTarget(states, { type: 'agent', name: 'sisyphus', profile: 'fast' })?.dirty).toBe(false);
   });
 
   it('discards restored dirty state when the same entity arrives for a different profile', async () => {
@@ -1111,7 +1129,7 @@ describe('webview lazy model picker (end-to-end)', () => {
     await restored.window.happyDOM.waitUntilComplete();
 
     expect((restored.window.document.getElementById('f-model') as HTMLInputElement).value).toBe('host-model');
-    expect((restored.states.at(-1) as { dirty?: boolean }).dirty).toBe(false);
+    expect(lastStateForTarget(restored.states, { type: 'agent', name: 'sisyphus', profile: 'careful' })?.dirty).toBe(false);
     await restored.window.happyDOM.close();
   });
 
@@ -1146,3 +1164,264 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(messages.filter((message) => typeof message === 'object' && message !== null && 'command' in message && message.command === 'save')).toHaveLength(0);
   });
 });
+
+describe('profile JSON editor', () => {
+  let env: WebviewTestEnv;
+
+  beforeEach(async () => {
+    env = await createWebviewWindow();
+  });
+
+  afterEach(async () => {
+    await env.window.happyDOM.close();
+  });
+
+  function getTextarea() {
+    return env.window.document.getElementById('profile-json-text') as HTMLTextAreaElement;
+  }
+
+  function getStatus() {
+    return env.window.document.getElementById('profile-json-status') as HTMLElement;
+  }
+
+  it('renders the active profile JSON heading and labelled textarea', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{"agents":{}}' });
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.querySelector('.editor__title')?.textContent).toBe('Profile JSON');
+    expect(window.document.querySelector('.editor__subtitle')?.textContent).toBe('Active config fragment');
+
+    const textarea = getTextarea();
+    expect(textarea).not.toBeNull();
+    expect(textarea.value).toBe('{"agents":{}}');
+    expect(textarea.getAttribute('aria-describedby')).toBe('profile-json-help');
+
+    const label = window.document.querySelector('label[for="profile-json-text"]');
+    expect(label).not.toBeNull();
+  });
+
+  it('renders the saved profile JSON heading', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'saved', profile: 'fast', text: '{"categories":{}}' });
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.querySelector('.editor__subtitle')?.textContent).toBe('fast');
+    expect(getTextarea().value).toBe('{"categories":{}}');
+  });
+
+  it('does not render model controls in JSON mode', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{}' });
+    await window.happyDOM.waitUntilComplete();
+
+    expect(window.document.getElementById('model-list')).toBeNull();
+    expect(window.document.getElementById('btn-add-fallback')).toBeNull();
+    expect(window.document.getElementById('btn-reload-models')).toBeNull();
+    expect(window.document.getElementById('model-datalist')).toBeNull();
+  });
+
+  it('posts save with target and text payload on button click', async () => {
+    const { window, messages } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{}' });
+    await window.happyDOM.waitUntilComplete();
+
+    const textarea = getTextarea();
+    textarea.value = '{"agents":{}}';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    const saveBtn = env.window.document.getElementById('btn-save') as HTMLButtonElement;
+    saveBtn.click();
+    await window.happyDOM.waitUntilComplete();
+
+    expect(messages).toContainEqual({
+      command: 'save',
+      target: { type: 'profileJson', source: 'active', profile: null },
+      payload: { text: '{"agents":{}}' },
+    });
+  });
+
+  it.each([
+    { ctrlKey: true, metaKey: false, key: 's' },
+    { ctrlKey: false, metaKey: true, key: 's' },
+  ])('saves on keyboard shortcut %o', async (keys) => {
+    const { window, messages } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{}' });
+    await window.happyDOM.waitUntilComplete();
+
+    const textarea = getTextarea();
+    textarea.value = '{"agents":{}}';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    const event = new window.KeyboardEvent('keydown', { ...keys, bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+    await window.happyDOM.waitUntilComplete();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(messages).toContainEqual({
+      command: 'save',
+      target: { type: 'profileJson', source: 'active', profile: null },
+      payload: { text: '{"agents":{}}' },
+    });
+  });
+
+  it('announces saved status and replaces textarea with canonical text', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{"agents":{}}' });
+    await window.happyDOM.waitUntilComplete();
+
+    const textarea = getTextarea();
+    textarea.value = '{"agents":{},"categories":{}}';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({ command: 'saved', target: { type: 'profileJson', source: 'active', profile: null }, text: '{\n  "agents": {},\n  "categories": {}\n}\n' });
+    await window.happyDOM.waitUntilComplete();
+
+    expect(getStatus().textContent).toContain('Saved.');
+    expect(textarea.value).toBe('{\n  "agents": {},\n  "categories": {}\n}\n');
+    expect(textarea.classList.contains('is-dirty')).toBe(false);
+  });
+
+  it('displays host parse/validation errors with path/line/column', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{}' });
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({
+      command: 'error',
+      target: { type: 'profileJson', source: 'active', profile: null },
+      message: 'Invalid JSON',
+      path: 'agents.sisyphus.model',
+      line: 3,
+      column: 12,
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const status = getStatus();
+    expect(status.textContent).toContain('Invalid JSON');
+    expect(status.textContent).toContain('agents.sisyphus.model');
+    expect(status.textContent).toContain('3');
+    expect(status.textContent).toContain('12');
+  });
+
+  it('announces dirty state for the current target only', async () => {
+    const { window, messages } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'saved', profile: 'fast', text: '{}' });
+    await window.happyDOM.waitUntilComplete();
+
+    const textarea = getTextarea();
+    textarea.value = '{"agents":{}}';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    expect(messages).toContainEqual({
+      command: 'dirtyState',
+      target: { type: 'profileJson', source: 'saved', profile: 'fast' },
+      dirty: true,
+    });
+  });
+
+  it('restores dirty drafts when switching targets A -> B -> A', async () => {
+    const { window, messages, states } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'saved', profile: 'A', text: '{}' });
+    await window.happyDOM.waitUntilComplete();
+
+    const textareaA = getTextarea();
+    textareaA.value = '{"agents":{}}';
+    textareaA.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    const savedState = states.at(-1);
+    const restored = await createWebviewWindow(savedState);
+    restored.window.postMessage({ command: 'init', type: 'profileJson', source: 'saved', profile: 'B', text: '{"categories":{}}' });
+    await restored.window.happyDOM.waitUntilComplete();
+
+    const textareaB = restored.window.document.getElementById('profile-json-text') as HTMLTextAreaElement;
+    expect(textareaB.value).toBe('{"categories":{}}');
+    textareaB.value = '{"categories":{"x":{}}}';
+    textareaB.dispatchEvent(new restored.window.Event('input', { bubbles: true }));
+    await restored.window.happyDOM.waitUntilComplete();
+
+    restored.window.postMessage({ command: 'init', type: 'profileJson', source: 'saved', profile: 'A', text: '{}' });
+    await restored.window.happyDOM.waitUntilComplete();
+
+    const textareaARestored = restored.window.document.getElementById('profile-json-text') as HTMLTextAreaElement;
+    expect(textareaARestored.value).toBe('{"agents":{}}');
+    expect(restored.messages).toContainEqual({
+      command: 'dirtyState',
+      target: { type: 'profileJson', source: 'saved', profile: 'A' },
+      dirty: true,
+    });
+
+    await restored.window.happyDOM.close();
+  });
+
+  it('ignores saved/error messages for a different target', async () => {
+    const { window } = env;
+    window.postMessage({ command: 'init', type: 'profileJson', source: 'saved', profile: 'A', text: '{}' });
+    await window.happyDOM.waitUntilComplete();
+
+    const textarea = getTextarea();
+    textarea.value = '{"agents":{}}';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    window.postMessage({ command: 'saved', target: { type: 'profileJson', source: 'saved', profile: 'B' }, text: '{}' });
+    window.postMessage({ command: 'error', target: { type: 'profileJson', source: 'saved', profile: 'B' }, message: 'wrong target' });
+    await window.happyDOM.waitUntilComplete();
+
+    const status = getStatus();
+    expect(status.textContent?.trim()).toBe('');
+    expect(status.hidden).toBe(true);
+    expect(textarea.value).toBe('{"agents":{}}');
+  });
+
+  it('does not clobber agent dirty state when editing profile JSON', async () => {
+    const { window, states } = env;
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'main' } });
+    await window.happyDOM.waitUntilComplete();
+
+    const modelInput = window.document.getElementById('f-model') as HTMLInputElement;
+    modelInput.value = 'dirty-model';
+    modelInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    const savedState = states.at(-1);
+    const restored = await createWebviewWindow(savedState);
+    restored.window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{}' });
+    await restored.window.happyDOM.waitUntilComplete();
+
+    const textarea = restored.window.document.getElementById('profile-json-text') as HTMLTextAreaElement;
+    textarea.value = '{"agents":{}}';
+    textarea.dispatchEvent(new restored.window.Event('input', { bubbles: true }));
+    await restored.window.happyDOM.waitUntilComplete();
+
+    restored.window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'host-model' } });
+    await restored.window.happyDOM.waitUntilComplete();
+
+    const modelInputRestored = restored.window.document.getElementById('f-model') as HTMLInputElement;
+    expect(modelInputRestored.value).toBe('dirty-model');
+    expect(restored.messages).toContainEqual({
+      command: 'dirtyState',
+      target: { type: 'agent', name: 'sisyphus', profile: null },
+      dirty: true,
+    });
+
+    await restored.window.happyDOM.close();
+  });
+
+  it('ignores old flat persisted state without corrupting JSON mode init', async () => {
+    const flatState = { kind: 'profileJson', name: 'legacy', profile: null, text: 'legacy-text', dirty: true };
+    const restored = await createWebviewWindow(flatState);
+    restored.window.postMessage({ command: 'init', type: 'profileJson', source: 'active', profile: null, text: '{"agents":{}}' });
+    await restored.window.happyDOM.waitUntilComplete();
+
+    const textarea = restored.window.document.getElementById('profile-json-text') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('{"agents":{}}');
+    await restored.window.happyDOM.close();
+  });
+});
+

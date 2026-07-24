@@ -48,6 +48,11 @@ describe('package.json command contributions', () => {
       'ohMyOpenAgent.duplicateProfile',
       'ohMyOpenAgent.deleteProfile',
       'ohMyOpenAgent.saveActiveProfile',
+      'ohMyOpenAgent.importProfiles',
+      'ohMyOpenAgent.exportAllProfiles',
+      'ohMyOpenAgent.exportProfile',
+      'ohMyOpenAgent.editProfileJson',
+      'ohMyOpenAgent.editActiveProfileJson',
     ]);
   });
 
@@ -85,6 +90,9 @@ describe('package.json command contributions', () => {
       { command: 'ohMyOpenAgent.duplicateProfile', when: 'false' },
       { command: 'ohMyOpenAgent.deleteProfile', when: 'false' },
       { command: 'ohMyOpenAgent.saveActiveProfile', when: 'false' },
+      { command: 'ohMyOpenAgent.exportProfile', when: 'false' },
+      { command: 'ohMyOpenAgent.editProfileJson', when: 'false' },
+      { command: 'ohMyOpenAgent.editActiveProfileJson', when: 'false' },
     ]);
   });
 });
