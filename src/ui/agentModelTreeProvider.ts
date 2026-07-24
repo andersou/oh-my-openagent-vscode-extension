@@ -4,9 +4,11 @@ import { ProfileStore } from '../config/profileStore.js';
 import type { ActiveProfileModification } from '../config/profileStore.js';
 import {
   BUILTIN_AGENTS,
+  BUILTIN_AGENT_DESCRIPTIONS,
   BUILTIN_CATEGORIES,
+  BUILTIN_CATEGORY_DESCRIPTIONS,
 } from '../config/schema.js';
-import type { AgentConfig, CategoryConfig, FallbackModels, Profile } from '../config/schema.js';
+import type { AgentConfig, BuiltinAgent, BuiltinCategory, CategoryConfig, FallbackModels, Profile } from '../config/schema.js';
 import * as path from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -210,6 +212,12 @@ export class AgentModelTreeProvider
     const hasOverride = override !== undefined;
     const effectiveModel = override?.model;
     const children = this.createConfigChildren('agents', name, override);
+    const description: string | undefined = Object.hasOwn(
+      BUILTIN_AGENT_DESCRIPTIONS,
+      name,
+    )
+      ? BUILTIN_AGENT_DESCRIPTIONS[name as BuiltinAgent]
+      : undefined;
     return this.createLeaf({
       group: 'agents',
       kind: hasOverride ? 'override' : 'agent',
@@ -217,7 +225,7 @@ export class AgentModelTreeProvider
       label: this.formatModelLabel(name, effectiveModel),
       contextValue: hasOverride ? 'agentOverride' : 'agent',
       icon: hasOverride ? 'edit' : 'person',
-      tooltip: this.formatTooltip(name, effectiveModel, override),
+      tooltip: this.formatTooltip(name, effectiveModel, override, description),
       children,
     });
   }
@@ -227,6 +235,12 @@ export class AgentModelTreeProvider
     const hasOverride = override !== undefined;
     const effectiveModel = override?.model;
     const children = this.createConfigChildren('categories', name, override);
+    const description: string | undefined = Object.hasOwn(
+      BUILTIN_CATEGORY_DESCRIPTIONS,
+      name,
+    )
+      ? BUILTIN_CATEGORY_DESCRIPTIONS[name as BuiltinCategory]
+      : undefined;
     return this.createLeaf({
       group: 'categories',
       kind: hasOverride ? 'override' : 'category',
@@ -234,7 +248,7 @@ export class AgentModelTreeProvider
       label: this.formatModelLabel(name, effectiveModel),
       contextValue: hasOverride ? 'categoryOverride' : 'category',
       icon: hasOverride ? 'edit' : 'tag',
-      tooltip: this.formatTooltip(name, effectiveModel, override),
+      tooltip: this.formatTooltip(name, effectiveModel, override, description),
       children,
     });
   }
@@ -593,10 +607,14 @@ export class AgentModelTreeProvider
     name: string,
     model: string | undefined,
     override: AgentConfig | CategoryConfig | undefined,
+    description: string | undefined,
   ): string {
-    const lines: string[] = [
+    const lines: string[] =
+      description !== undefined ? [name, description, ''] : [];
+
+    lines.push(
       model ? `${name} — model: ${model}` : `${name} — using default model`,
-    ];
+    );
 
     const params = this.formatParams(override);
     if (params.length > 0) {

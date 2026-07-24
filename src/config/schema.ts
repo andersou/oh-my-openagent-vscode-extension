@@ -26,6 +26,31 @@ export const BUILTIN_CATEGORIES = [
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
 export type BuiltinCategory = (typeof BUILTIN_CATEGORIES)[number];
 
+export const BUILTIN_AGENT_DESCRIPTIONS: Record<BuiltinAgent, string> = {
+  sisyphus: 'Main orchestrator. Plans, delegates, drives to completion.',
+  hephaestus: '"Codex on steroids." Deep autonomous worker, GPT-native.',
+  prometheus: 'Strategic planner, interviews you before code is written.',
+  oracle: 'Architecture/debugging consultant.',
+  librarian: 'External docs/code search.',
+  explore: 'Fast codebase grep.',
+  'multimodal-looker': 'Vision/PDF analysis.',
+  metis: 'Pre-planning consultant, reviews Prometheus plans for gaps.',
+  momus: 'High-accuracy plan reviewer.',
+  atlas: 'Todo-list orchestrator.',
+  'sisyphus-junior': 'Category-spawned executor for delegated tasks.',
+};
+
+export const BUILTIN_CATEGORY_DESCRIPTIONS: Record<BuiltinCategory, string> = {
+  'visual-engineering': 'Frontend, UI, CSS, design.',
+  ultrabrain: 'Maximum reasoning needed.',
+  deep: 'Deep coding, complex logic.',
+  artistry: 'Creative, novel approaches.',
+  quick: 'Simple, fast tasks.',
+  'unspecified-low': 'General standard work.',
+  'unspecified-high': 'General complex work.',
+  writing: 'Text, docs, prose.',
+};
+
 export type Permission = 'ask' | 'allow' | 'deny';
 export type AgentMode = 'subagent' | 'primary' | 'all';
 export type ReasoningEffort =

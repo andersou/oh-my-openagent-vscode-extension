@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { AgentModelTreeProvider } from './agentModelTreeProvider.js';
-import { BUILTIN_AGENTS, BUILTIN_CATEGORIES } from '../config/schema.js';
+import {
+  BUILTIN_AGENTS,
+  BUILTIN_CATEGORIES,
+  BUILTIN_AGENT_DESCRIPTIONS,
+  BUILTIN_CATEGORY_DESCRIPTIONS,
+} from '../config/schema.js';
 import type { ConfigStore } from '../config/configStore.js';
 import type { ProfileStore } from '../config/profileStore.js';
 import type { Profile } from '../config/schema.js';
@@ -383,6 +388,51 @@ describe('AgentModelTreeProvider', () => {
   });
 
   describe('sidebar metadata display', () => {
+    it('shows agent description in the tooltip for a built-in agent without an override', () => {
+      const group = findGroup(provider, 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.tooltip).toMatch(
+        new RegExp(`^sisyphus\\n${BUILTIN_AGENT_DESCRIPTIONS.sisyphus.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n\\n`),
+      );
+      expect(sisyphus.tooltip).toContain('using default model');
+    });
+
+    it('shows agent description in the tooltip for an agent override', () => {
+      configStore = makeConfigStoreStub({
+        sisyphus: {
+          model: 'openai/gpt-4',
+          variant: 'max',
+          temperature: 0.7,
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const group = findGroup(provider, 'agents')!;
+      const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
+      expect(sisyphus.tooltip).toMatch(
+        new RegExp(`^sisyphus\\n${BUILTIN_AGENT_DESCRIPTIONS.sisyphus.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n\\n`),
+      );
+      expect(sisyphus.tooltip).toContain('model: openai/gpt-4');
+      expect(sisyphus.tooltip).toContain('variant=max');
+      expect(sisyphus.tooltip).toContain('temperature=0.7');
+    });
+
+    it('shows category description in the tooltip for an overridden category', () => {
+      configStore = makeConfigStoreStub({}, {
+        'visual-engineering': {
+          model: 'openai/gpt-4o',
+          top_p: 0.9,
+        },
+      });
+      provider = new AgentModelTreeProvider(configStore, profileStore);
+      const group = findGroup(provider, 'categories')!;
+      const visual = provider.getChildren(group).find((l) => l.nodeName === 'visual-engineering')!;
+      expect(visual.tooltip).toMatch(
+        new RegExp(`^visual-engineering\\n${BUILTIN_CATEGORY_DESCRIPTIONS['visual-engineering'].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n\\n`),
+      );
+      expect(visual.tooltip).toContain('model: openai/gpt-4o');
+      expect(visual.tooltip).toContain('top_p=0.9');
+    });
+
     it('shows configured params in the tooltip for an agent override', () => {
       configStore = makeConfigStoreStub({
         sisyphus: {
