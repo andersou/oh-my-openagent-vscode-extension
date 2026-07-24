@@ -156,17 +156,19 @@ export class AgentModelTreeProvider
 
   getChildren(element?: AgentModelTreeItem): AgentModelTreeItem[] {
     if (!element) {
-      const roots: AgentModelTreeItem[] = [this.createConfigFileItem()];
-      const activeProfile = this.createActiveProfileItem();
+      const configFile = this.createConfigFileItem();
+      const agentsGroup = this.createGroup('Agents', 'agents');
+      const categoriesGroup = this.createGroup('Categories', 'categories');
+      const activeProfile = this.createActiveProfileItem(agentsGroup, categoriesGroup);
       if (activeProfile) {
-        roots.push(activeProfile);
+        configFile.children = [activeProfile];
+      } else {
+        configFile.children = [agentsGroup, categoriesGroup];
       }
-      roots.push(
-        this.createGroup('Agents', 'agents'),
-        this.createGroup('Categories', 'categories'),
+      return [
+        configFile,
         this.createGroup('Profiles', 'profiles'),
-      );
-      return roots;
+      ];
     }
     if (element.children) {
       return element.children;
@@ -298,7 +300,7 @@ export class AgentModelTreeProvider
     const configPath = this.configStore.getConfigPath();
     const item = new vscode.TreeItem(
       path.basename(configPath),
-      vscode.TreeItemCollapsibleState.None,
+      vscode.TreeItemCollapsibleState.Expanded,
     ) as AgentModelTreeItem;
     item.kind = 'configFile';
     item.id = '__omo_config_file__';
@@ -308,7 +310,10 @@ export class AgentModelTreeProvider
     return item;
   }
 
-  private createActiveProfileItem(): AgentModelTreeItem | undefined {
+  private createActiveProfileItem(
+    agentsGroup: AgentModelTreeItem,
+    categoriesGroup: AgentModelTreeItem,
+  ): AgentModelTreeItem | undefined {
     const active = this.profileStore.getActiveProfileName();
     if (active === undefined) return undefined;
     const profile = this.profileStore.getProfile(active);
@@ -320,9 +325,7 @@ export class AgentModelTreeProvider
       : [];
     const item = new vscode.TreeItem(
       modified ? `${active} *` : active,
-      modifications.length > 0
-        ? vscode.TreeItemCollapsibleState.Collapsed
-        : vscode.TreeItemCollapsibleState.None,
+      vscode.TreeItemCollapsibleState.Expanded,
     ) as AgentModelTreeItem;
     item.kind = 'activeProfile';
     item.id = '__omo_active_profile__';
@@ -333,9 +336,11 @@ export class AgentModelTreeProvider
     item.tooltip = modified
       ? `Active profile "${active}" has unsaved config changes. Use Save Active Profile to persist them.`
       : `Active profile: ${active}`;
-    item.children = modifications.map((m) =>
-      this.createActiveProfileModificationChild(m),
-    );
+    item.children = [
+      ...modifications.map((m) => this.createActiveProfileModificationChild(m)),
+      agentsGroup,
+      categoriesGroup,
+    ];
     return item;
   }
 

@@ -14,6 +14,7 @@ import type {
 } from './config/profileValidation.js';
 import type { ProfileStore } from './config/profileStore.js';
 import type {
+  ProfileFragmentParseResult,
   ProfileTransferParseResult,
   ProfileTransferRoot,
 } from './config/profileTransfer.js';
@@ -68,6 +69,22 @@ export interface ProfileTransferCommandContext {
     items: readonly T[],
     options?: { placeHolder?: string },
   ) => Thenable<T | undefined>;
+  readonly parseConfigFragmentBytes: (
+    input: Uint8Array,
+  ) => ProfileFragmentParseResult;
+  readonly validateProfileFragment: (
+    value: unknown,
+  ) => ProfileValidationResult<ProfileFragment>;
+  readonly deriveProfileNameFromSource: (sourceName: string) => string;
+  readonly showInputBox: (
+    options?: {
+      value?: string;
+      prompt?: string;
+      validateInput?: (
+        value: string,
+      ) => string | undefined | Thenable<string | undefined>;
+    },
+  ) => Thenable<string | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +132,81 @@ export async function handleImportProfiles(
   }
 
   await importSidecar(context, validationResult.value.value, filename);
+}
+
+export async function handleCreateProfileFromConfig(
+  context: ProfileTransferCommandContext,
+): Promise<void> {
+  const fileResult = await context.openTransferFile({
+    filters: {
+      'JSON/JSONC files': ['json', 'jsonc'],
+      'All files': ['*'],
+    },
+  });
+
+  if (fileResult.status === 'cancelled') {
+    return;
+  }
+  if (fileResult.status === 'error') {
+    void context.showErrorMessage(
+      `Create profile failed: ${fileResult.error.message}`,
+    );
+    return;
+  }
+
+  const { uri, bytes } = fileResult.value;
+  const filename = path.basename(uri.fsPath);
+
+  const parseResult = context.parseConfigFragmentBytes(bytes);
+  if (!parseResult.ok) {
+    void context.showErrorMessage(
+      `Create profile failed: ${parseResult.error.message}`,
+    );
+    return;
+  }
+
+  const validationResult = context.validateProfileFragment(parseResult.value);
+  if (!validationResult.ok) {
+    void context.showErrorMessage(
+      `Create profile failed: ${validationResult.error.message}`,
+    );
+    return;
+  }
+
+  const fragment = validationResult.value;
+  const suggestedName = context.deriveProfileNameFromSource(filename);
+
+  const name = await context.showInputBox({
+    value: suggestedName,
+    prompt: 'Profile name',
+    validateInput: (value) => {
+      const trimmed = value.trim();
+      if (trimmed === '') {
+        return 'Profile name is required';
+      }
+      if (context.profileStore.getProfile(trimmed) !== undefined) {
+        return `Profile "${trimmed}" already exists`;
+      }
+      return undefined;
+    },
+  });
+
+  if (name === undefined) {
+    return;
+  }
+
+  const trimmedName = name.trim();
+  try {
+    const profile = await context.profileStore.createProfileFromFragment(
+      trimmedName,
+      fragment,
+    );
+    void context.showInformationMessage(
+      `Created profile "${profile.name}" from "${filename}".`,
+    );
+  } catch (err) {
+    reportTransferError(context, 'Create profile failed', err);
+  }
 }
 
 async function importSingleFragment(

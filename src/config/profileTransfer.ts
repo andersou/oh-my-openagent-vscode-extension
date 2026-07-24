@@ -61,6 +61,15 @@ export type ProfileTransferParseResult =
   | ProfileTransferParseSuccess
   | ProfileTransferParseFailure;
 
+export interface ProfileFragmentParseSuccess {
+  readonly ok: true;
+  readonly value: UnvalidatedJsonObject;
+}
+
+export type ProfileFragmentParseResult =
+  | ProfileFragmentParseSuccess
+  | ProfileTransferParseFailure;
+
 interface SourceLocation {
   readonly line: number;
   readonly column: number;
@@ -276,6 +285,117 @@ export function parseProfileTransfer(
       path: [],
       line: 1,
       column: 1,
+    },
+  };
+}
+
+/** Parse an oh-my-openagent config byte fragment and extract only the agent/category sections.
+ *
+ * Unlike {@link parseProfileTransfer}, this accepts config roots that also contain
+ * `profiles` or `version` sidecar keys. Only `agents` and `categories` are returned;
+ * all other top-level keys are ignored. At least one of the two sections must be present.
+ */
+export function parseConfigFragmentBytes(
+  input: Uint8Array,
+): ProfileFragmentParseResult {
+  if (input.byteLength > MAX_PROFILE_TRANSFER_BYTES) {
+    return {
+      ok: false,
+      error: {
+        code: 'input_too_large',
+        message: `Config input exceeds ${MAX_PROFILE_TRANSFER_BYTES} bytes`,
+        path: [],
+      },
+    };
+  }
+
+  let decoded: string;
+  try {
+    decoded = new TextDecoder('utf-8', {
+      fatal: true,
+      ignoreBOM: true,
+    }).decode(input);
+  } catch (error: unknown) {
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+    return {
+      ok: false,
+      error: {
+        code: 'invalid_utf8',
+        message: 'Config input is not valid UTF-8',
+        path: [],
+      },
+    };
+  }
+
+  const text = decoded.startsWith('\uFEFF') ? decoded.slice(1) : decoded;
+  const parseErrors: ParseError[] = [];
+  const value: unknown = parse(text, parseErrors, JSONC_OPTIONS);
+  const firstParseError = parseErrors[0];
+
+  if (firstParseError !== undefined) {
+    const location = getParseErrorLocation(text, firstParseError);
+    return {
+      ok: false,
+      error: {
+        code: 'syntax_error',
+        message: `Invalid JSONC: ${printParseErrorCode(firstParseError.error)}`,
+        path: [...getLocation(text, firstParseError.offset).path],
+        line: location.line,
+        column: location.column,
+      },
+    };
+  }
+
+  const propertyScan = scanProperties(text);
+  if (propertyScan.duplicate !== undefined) {
+    return {
+      ok: false,
+      error: {
+        code: 'duplicate_key',
+        message: 'Config input contains a duplicate JSON key',
+        path: propertyScan.duplicate.path,
+        line: propertyScan.duplicate.line,
+        column: propertyScan.duplicate.column,
+      },
+    };
+  }
+
+  if (!isJsonObject(value)) {
+    return {
+      ok: false,
+      error: {
+        code: 'root_not_object',
+        message: 'Config input root must be a JSON object',
+        path: [],
+        line: 1,
+        column: 1,
+      },
+    };
+  }
+
+  const hasAgents = Object.hasOwn(value, 'agents');
+  const hasCategories = Object.hasOwn(value, 'categories');
+
+  if (!hasAgents && !hasCategories) {
+    return {
+      ok: false,
+      error: {
+        code: 'missing_profile_sections',
+        message: 'Config input must contain agents or categories',
+        path: [],
+        line: 1,
+        column: 1,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...(hasAgents ? { agents: value.agents } : {}),
+      ...(hasCategories ? { categories: value.categories } : {}),
     },
   };
 }

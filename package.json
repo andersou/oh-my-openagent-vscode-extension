@@ -65,6 +65,11 @@
         "category": "Oh My OpenAgent"
       },
       {
+        "command": "ohMyOpenAgent.createProfileFromConfig",
+        "title": "Create Profile from Config File…",
+        "category": "Oh My OpenAgent"
+      },
+      {
         "command": "ohMyOpenAgent.activateProfile",
         "title": "Activate Profile",
         "category": "Oh My OpenAgent"
@@ -92,15 +97,15 @@
       },
       {
         "command": "ohMyOpenAgent.importProfiles",
-        "title": "Import Profiles",
+        "title": "Import Profile(s)",
         "category": "Oh My OpenAgent",
-        "icon": "$(arrow-down)"
+        "icon": "$(insert)"
       },
       {
         "command": "ohMyOpenAgent.exportAllProfiles",
         "title": "Export All Profiles",
         "category": "Oh My OpenAgent",
-        "icon": "$(arrow-up)"
+        "icon": "$(export)"
       },
       {
         "command": "ohMyOpenAgent.exportProfile",
@@ -169,6 +174,21 @@
           "command": "ohMyOpenAgent.editActiveProfileJson",
           "when": "view == ohMyOpenAgent.models && viewItem == configFile",
           "group": "inline"
+        },
+        {
+          "command": "ohMyOpenAgent.createProfileFromConfig",
+          "when": "view == ohMyOpenAgent.models && viewItem == profilesGroup",
+          "group": "profileOps@1"
+        },
+        {
+          "command": "ohMyOpenAgent.importProfiles",
+          "when": "view == ohMyOpenAgent.models && viewItem == profilesGroup",
+          "group": "profileOps@2"
+        },
+        {
+          "command": "ohMyOpenAgent.exportAllProfiles",
+          "when": "view == ohMyOpenAgent.models && viewItem == profilesGroup",
+          "group": "profileOps@3"
         }
       ],
       "commandPalette": [

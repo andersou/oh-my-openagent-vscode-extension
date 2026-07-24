@@ -7,11 +7,14 @@ import type { ConfigStore } from './config/configStore.js';
 import type { ProfileStore } from './config/profileStore.js';
 import {
   containsProviderOptions,
+  deriveProfileNameFromSource,
+  parseConfigFragmentBytes,
   parseProfileTransferBytes,
   sanitizeExportBasename,
   serializeProfileTransfer,
   validateProfileTransfer,
 } from './config/profileTransfer.js';
+import { validateProfileFragment } from './config/profileValidation.js';
 import { AgentEditorPanel } from './ui/agentEditorPanel.js';
 import type { AgentModelTreeProvider, AgentModelTreeItem } from './ui/agentModelTreeProvider.js';
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
@@ -20,6 +23,7 @@ import {
   saveTransferFile,
 } from './vscode/profileTransferFiles.js';
 import {
+  handleCreateProfileFromConfig,
   handleEditActiveProfileJson,
   handleEditProfileJson,
   handleExportAllProfiles,
@@ -30,6 +34,7 @@ import {
 
 export type { ProfileTransferCommandContext } from './profileTransferCommandHandlers.js';
 export {
+  handleCreateProfileFromConfig,
   handleEditActiveProfileJson,
   handleEditProfileJson,
   handleExportAllProfiles,
@@ -64,10 +69,13 @@ export function createProfileTransferCommandContext(
     openTransferFile,
     saveTransferFile,
     parseProfileTransferBytes,
+    parseConfigFragmentBytes,
     validateProfileTransfer,
+    validateProfileFragment,
     serializeProfileTransfer,
     containsProviderOptions,
     sanitizeExportBasename,
+    deriveProfileNameFromSource,
     showInformationMessage: (message, ...items) =>
       vscode.window.showInformationMessage(message, ...items),
     showWarningMessage: (message, ...items) =>
@@ -82,11 +90,12 @@ export function createProfileTransferCommandContext(
       vscode.window.showErrorMessage(message, ...items),
     showQuickPick: (items, options) =>
       vscode.window.showQuickPick(items, options),
+    showInputBox: (options) => vscode.window.showInputBox(options),
   };
 }
 
 /**
- * Register the five profile transfer command IDs and return a composite
+ * Register the six profile transfer command IDs and return a composite
  * disposable.
  */
 export function registerProfileTransferCommands(
@@ -113,6 +122,10 @@ export function registerProfileTransferCommands(
       'ohMyOpenAgent.editActiveProfileJson',
       (item: AgentModelTreeItem | undefined) =>
         handleEditActiveProfileJson(context, item),
+    ),
+    vscode.commands.registerCommand(
+      'ohMyOpenAgent.createProfileFromConfig',
+      () => handleCreateProfileFromConfig(context),
     ),
   ];
 

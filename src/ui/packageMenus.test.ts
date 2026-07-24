@@ -42,6 +42,7 @@ describe('package.json command contributions', () => {
       'ohMyOpenAgent.editCategory',
       'ohMyOpenAgent.refresh',
       'ohMyOpenAgent.createProfile',
+      'ohMyOpenAgent.createProfileFromConfig',
       'ohMyOpenAgent.activateProfile',
       'ohMyOpenAgent.renameProfile',
       'ohMyOpenAgent.duplicateProfile',
@@ -120,6 +121,27 @@ describe('package.json view/item/context menus', () => {
           command: 'ohMyOpenAgent.editCategory',
           when:
             'view == ohMyOpenAgent.models && (viewItem == category || viewItem == categoryOverride)',
+        }),
+      ]),
+    );
+  });
+
+  it('wires profile management commands for the profiles group header', () => {
+    const entries = readPackageJson().contributes?.menus?.['view/item/context'] ?? [];
+
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: 'ohMyOpenAgent.createProfileFromConfig',
+          when: 'view == ohMyOpenAgent.models && viewItem == profilesGroup',
+        }),
+        expect.objectContaining({
+          command: 'ohMyOpenAgent.importProfiles',
+          when: 'view == ohMyOpenAgent.models && viewItem == profilesGroup',
+        }),
+        expect.objectContaining({
+          command: 'ohMyOpenAgent.exportAllProfiles',
+          when: 'view == ohMyOpenAgent.models && viewItem == profilesGroup',
         }),
       ]),
     );

@@ -10,6 +10,7 @@ vi.mock('vscode', () => ({
     showWarningMessage: vi.fn(),
     showErrorMessage: vi.fn(),
     showQuickPick: vi.fn(),
+    showInputBox: vi.fn(),
   },
   workspace: {
     openTextDocument: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('./ui/agentEditorPanel.js', () => ({
 
 import {
   registerProfileTransferCommands,
+  handleCreateProfileFromConfig,
   handleImportProfiles,
   handleExportAllProfiles,
   handleExportProfile,
@@ -53,8 +55,13 @@ import type {
   ProfileValidationResult,
 } from './config/profileValidation.js';
 import type {
+  ProfileFragmentParseResult,
   ProfileTransferParseResult,
   ProfileTransferRoot,
+} from './config/profileTransfer.js';
+import {
+  deriveProfileNameFromSource,
+  parseConfigFragmentBytes,
 } from './config/profileTransfer.js';
 import type {
   ImportProfilesResult,
@@ -72,20 +79,26 @@ type MockedContext = ProfileTransferCommandContext & {
     importProfiles: ReturnType<typeof vi.fn>;
     getProfileFragment: ReturnType<typeof vi.fn>;
     getProfilesFileSnapshot: ReturnType<typeof vi.fn>;
+    getProfile: ReturnType<typeof vi.fn>;
+    createProfileFromFragment: ReturnType<typeof vi.fn>;
   };
   showProfileJson: ReturnType<typeof vi.fn>;
   openTransferFile: ReturnType<typeof vi.fn>;
   saveTransferFile: ReturnType<typeof vi.fn>;
   parseProfileTransferBytes: ReturnType<typeof vi.fn>;
+  parseConfigFragmentBytes: ReturnType<typeof vi.fn>;
   validateProfileTransfer: ReturnType<typeof vi.fn>;
+  validateProfileFragment: ReturnType<typeof vi.fn>;
   serializeProfileTransfer: ReturnType<typeof vi.fn>;
   containsProviderOptions: ReturnType<typeof vi.fn>;
   sanitizeExportBasename: ReturnType<typeof vi.fn>;
+  deriveProfileNameFromSource: ReturnType<typeof vi.fn>;
   showInformationMessage: ReturnType<typeof vi.fn>;
   showWarningMessage: ReturnType<typeof vi.fn>;
   showWarningMessageModal: ReturnType<typeof vi.fn>;
   showErrorMessage: ReturnType<typeof vi.fn>;
   showQuickPick: ReturnType<typeof vi.fn>;
+  showInputBox: ReturnType<typeof vi.fn>;
 };
 
 function createFakeContext(): MockedContext {
@@ -96,22 +109,32 @@ function createFakeContext(): MockedContext {
       importProfiles: vi.fn(),
       getProfileFragment: vi.fn(),
       getProfilesFileSnapshot: vi.fn(),
+      getProfile: vi.fn(),
+      createProfileFromFragment: vi.fn(),
     },
     showProfileJson: vi.fn(),
     openTransferFile: vi.fn(),
     saveTransferFile: vi.fn(),
     parseProfileTransferBytes: vi.fn(),
+    parseConfigFragmentBytes: vi.fn((input: Uint8Array) =>
+      parseConfigFragmentBytes(input),
+    ),
     validateProfileTransfer: vi.fn(),
+    validateProfileFragment: vi.fn(),
     serializeProfileTransfer: vi.fn(
       (value: unknown) => JSON.stringify(value, null, 2) + '\n',
     ),
     containsProviderOptions: vi.fn(),
     sanitizeExportBasename: vi.fn((name: string) => name),
+    deriveProfileNameFromSource: vi.fn((name: string) =>
+      deriveProfileNameFromSource(name),
+    ),
     showInformationMessage: vi.fn(),
     showWarningMessage: vi.fn(),
     showWarningMessageModal: vi.fn(),
     showErrorMessage: vi.fn(),
     showQuickPick: vi.fn(),
+    showInputBox: vi.fn(),
   } as unknown as MockedContext;
 }
 
@@ -145,7 +168,7 @@ function openedFile(path: string): TransferFileResult<OpenedTransferFile> {
 // ---------------------------------------------------------------------------
 
 describe('registerProfileTransferCommands', () => {
-  it('registers all five profile transfer command IDs', () => {
+  it('registers all six profile transfer command IDs', () => {
     registerProfileTransferCommands(createFakeContext());
 
     const calls = vi.mocked(vscode.commands.registerCommand).mock.calls;
@@ -155,6 +178,7 @@ describe('registerProfileTransferCommands', () => {
       'ohMyOpenAgent.exportProfile',
       'ohMyOpenAgent.editProfileJson',
       'ohMyOpenAgent.editActiveProfileJson',
+      'ohMyOpenAgent.createProfileFromConfig',
     ]);
   });
 });
@@ -371,6 +395,228 @@ describe('handleImportProfiles', () => {
 
     expect(context.showErrorMessage).toHaveBeenCalledWith(
       'Import failed: sidecar locked',
+    );
+  });
+});
+
+describe('handleCreateProfileFromConfig', () => {
+  let context: MockedContext;
+
+  beforeEach(() => {
+    context = createFakeContext();
+  });
+
+  it('is a no-op when the file dialog is cancelled', async () => {
+    context.openTransferFile.mockResolvedValue({ status: 'cancelled' });
+
+    await handleCreateProfileFromConfig(context);
+
+    expect(context.parseConfigFragmentBytes).not.toHaveBeenCalled();
+    expect(context.profileStore.createProfileFromFragment).not.toHaveBeenCalled();
+    expect(context.showInformationMessage).not.toHaveBeenCalled();
+    expect(context.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('shows a path-independent error on parse failure', async () => {
+    context.openTransferFile.mockResolvedValue(openedFile('/secret/path.jsonc'));
+    context.parseConfigFragmentBytes.mockReturnValue({
+      ok: false,
+      error: {
+        code: 'syntax_error',
+        message: 'Invalid JSONC',
+        path: [],
+      },
+    } as ProfileFragmentParseResult);
+
+    await handleCreateProfileFromConfig(context);
+
+    expect(context.showErrorMessage).toHaveBeenCalledWith(
+      'Create profile failed: Invalid JSONC',
+    );
+    expect(context.showErrorMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('/secret/path.jsonc'),
+    );
+    expect(context.profileStore.createProfileFromFragment).not.toHaveBeenCalled();
+  });
+
+  it('shows a path-independent error on validation failure', async () => {
+    context.openTransferFile.mockResolvedValue(openedFile('/secret/path.jsonc'));
+    context.parseConfigFragmentBytes.mockReturnValue({
+      ok: true,
+      value: { agents: {} },
+    } as ProfileFragmentParseResult);
+    context.validateProfileFragment.mockReturnValue({
+      ok: false,
+      error: {
+        code: 'missing_field',
+        message: 'Missing sections',
+        path: [],
+      },
+    } as ProfileValidationResult<ProfileFragment>);
+
+    await handleCreateProfileFromConfig(context);
+
+    expect(context.showErrorMessage).toHaveBeenCalledWith(
+      'Create profile failed: Missing sections',
+    );
+    expect(context.profileStore.createProfileFromFragment).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when the input box is cancelled', async () => {
+    context.openTransferFile.mockResolvedValue(openedFile('/path/to/file.jsonc'));
+    context.parseConfigFragmentBytes.mockReturnValue({
+      ok: true,
+      value: { agents: {}, categories: {} },
+    } as ProfileFragmentParseResult);
+    context.validateProfileFragment.mockReturnValue({
+      ok: true,
+      value: { agents: {}, categories: {} },
+    } as ProfileValidationResult<ProfileFragment>);
+    context.showInputBox.mockResolvedValue(undefined);
+
+    await handleCreateProfileFromConfig(context);
+
+    expect(context.profileStore.createProfileFromFragment).not.toHaveBeenCalled();
+    expect(context.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('creates a profile from the filename-derived name and reports success', async () => {
+    context.openTransferFile.mockResolvedValue(
+      openedFile('/path/to/oh-my-openagent.jsonc'),
+    );
+    context.parseConfigFragmentBytes.mockReturnValue({
+      ok: true,
+      value: { agents: { sisyphus: { model: 'gpt-4' } }, categories: {} },
+    } as ProfileFragmentParseResult);
+    context.validateProfileFragment.mockReturnValue({
+      ok: true,
+      value: { agents: { sisyphus: { model: 'gpt-4' } }, categories: {} },
+    } as ProfileValidationResult<ProfileFragment>);
+    context.showInputBox.mockResolvedValue('oh-my-openagent');
+    context.profileStore.createProfileFromFragment.mockResolvedValue({
+      name: 'oh-my-openagent',
+    } as Profile);
+
+    await handleCreateProfileFromConfig(context);
+
+    expect(context.deriveProfileNameFromSource).toHaveBeenCalledWith(
+      'oh-my-openagent.jsonc',
+    );
+    expect(context.showInputBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'oh-my-openagent',
+        prompt: 'Profile name',
+      }),
+    );
+    expect(context.profileStore.createProfileFromFragment).toHaveBeenCalledWith(
+      'oh-my-openagent',
+      { agents: { sisyphus: { model: 'gpt-4' } }, categories: {} },
+    );
+    expect(context.showInformationMessage).toHaveBeenCalledWith(
+      'Created profile "oh-my-openagent" from "oh-my-openagent.jsonc".',
+    );
+  });
+
+  it('trims the user-edited name before creating the profile', async () => {
+    context.openTransferFile.mockResolvedValue(openedFile('/path/to/file.jsonc'));
+    context.parseConfigFragmentBytes.mockReturnValue({
+      ok: true,
+      value: { agents: {}, categories: {} },
+    } as ProfileFragmentParseResult);
+    context.validateProfileFragment.mockReturnValue({
+      ok: true,
+      value: { agents: {}, categories: {} },
+    } as ProfileValidationResult<ProfileFragment>);
+    context.showInputBox.mockResolvedValue('  custom-name  ');
+    context.profileStore.createProfileFromFragment.mockResolvedValue({
+      name: 'custom-name',
+    } as Profile);
+
+    await handleCreateProfileFromConfig(context);
+
+    expect(context.profileStore.createProfileFromFragment).toHaveBeenCalledWith(
+      'custom-name',
+      { agents: {}, categories: {} },
+    );
+    expect(context.showInformationMessage).toHaveBeenCalledWith(
+      'Created profile "custom-name" from "file.jsonc".',
+    );
+  });
+
+  it('validates the input name against existing profiles', async () => {
+    context.openTransferFile.mockResolvedValue(openedFile('/path/to/file.jsonc'));
+    context.parseConfigFragmentBytes.mockReturnValue({
+      ok: true,
+      value: { agents: {}, categories: {} },
+    } as ProfileFragmentParseResult);
+    context.validateProfileFragment.mockReturnValue({
+      ok: true,
+      value: { agents: {}, categories: {} },
+    } as ProfileValidationResult<ProfileFragment>);
+    context.profileStore.getProfile.mockImplementation((name: string) => {
+      if (name === 'existing') {
+        return { name: 'existing' } as Profile;
+      }
+      return undefined;
+    });
+    context.showInputBox.mockResolvedValue('fresh');
+    context.profileStore.createProfileFromFragment.mockResolvedValue({
+      name: 'fresh',
+    } as Profile);
+
+    await handleCreateProfileFromConfig(context);
+
+    const inputOptions = context.showInputBox.mock.calls[0][0] as {
+      validateInput: (value: string) => string | undefined;
+    };
+    expect(inputOptions.validateInput('existing')).toBe(
+      'Profile "existing" already exists',
+    );
+    expect(inputOptions.validateInput('fresh')).toBeUndefined();
+    expect(context.profileStore.createProfileFromFragment).toHaveBeenCalledWith(
+      'fresh',
+      { agents: {}, categories: {} },
+    );
+  });
+
+  it('extracts only agents and categories from a full config fixture', async () => {
+    const fullConfig = JSON.stringify({
+      $schema: 'https://omo.dev/schema.json',
+      agents: { sisyphus: { model: 'gpt-4' } },
+      categories: {},
+      other: 'ignored',
+    });
+    const bytes = new TextEncoder().encode(fullConfig);
+    const parsed = parseConfigFragmentBytes(bytes);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    context.openTransferFile.mockResolvedValue({
+      status: 'success',
+      value: {
+        uri: vscode.Uri.file('/path/to/oh-my-openagent.json') as vscode.Uri,
+        bytes,
+      },
+    });
+    context.parseConfigFragmentBytes.mockReturnValue(
+      parsed as ProfileFragmentParseResult,
+    );
+    context.validateProfileFragment.mockReturnValue({
+      ok: true,
+      value: parsed.value,
+    } as ProfileValidationResult<ProfileFragment>);
+    context.showInputBox.mockResolvedValue('oh-my-openagent');
+    context.profileStore.createProfileFromFragment.mockResolvedValue({
+      name: 'oh-my-openagent',
+    } as Profile);
+
+    await handleCreateProfileFromConfig(context);
+
+    expect(context.profileStore.createProfileFromFragment).toHaveBeenCalledWith(
+      'oh-my-openagent',
+      { agents: { sisyphus: { model: 'gpt-4' } }, categories: {} },
     );
   });
 });

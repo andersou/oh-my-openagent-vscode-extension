@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConfigStore } from './configStore.js';
 import {
   MAX_PROFILE_TRANSFER_BYTES,
+  parseConfigFragmentBytes,
   parseProfileTransfer,
 } from './profileTransfer.js';
 
@@ -307,6 +308,29 @@ describe('profile transfer parsing', () => {
   });
 
   it.each([
+    { label: 'empty object', text: '{}' },
+    { label: 'unrelated root keys', text: '{"version":1}' },
+  ])('rejects $label without agents or categories', ({ text }) => {
+    // Given
+    const input = encode(text);
+
+    // When
+    const result = parseProfileTransfer(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'missing_profile_sections',
+        path: [],
+        line: 1,
+        column: 1,
+      },
+    });
+    expect(result).not.toHaveProperty('root');
+  });
+
+  it.each([
     {
       label: 'agents',
       text: '{\n  "profiles": [],\n  "agents": {}\n}',
@@ -337,5 +361,200 @@ describe('profile transfer parsing', () => {
       },
     });
     expect(result).not.toHaveProperty('root');
+  });
+});
+
+describe('parseConfigFragmentBytes', () => {
+  it('extracts agents and categories from a full oh-my-openagent config, dropping other top-level keys', () => {
+    // Given
+    const input = encode(`{
+  "$schema": "https://omo.dev/schema/oh-my-openagent.json",
+  "version": 1,
+  "profiles": [],
+  "lastActiveProfile": "fast",
+  "agents": { "sisyphus": { "model": "custom/model" } },
+  "categories": { "quick": { "model": "quick/model" } },
+  "unknown": true
+}`);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        agents: { sisyphus: { model: 'custom/model' } },
+        categories: { quick: { model: 'quick/model' } },
+      },
+    });
+  });
+
+  it('extracts an agents-only fragment', () => {
+    // Given
+    const input = encode('{"agents":{"sisyphus":{"model":"a"}}}');
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { agents: { sisyphus: { model: 'a' } } },
+    });
+  });
+
+  it('extracts a categories-only fragment', () => {
+    // Given
+    const input = encode('{"categories":{"quick":{"model":"b"}}}');
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { categories: { quick: { model: 'b' } } },
+    });
+  });
+
+  it('rejects a root that has neither agents nor categories', () => {
+    // Given
+    const input = encode('{"version":1,"profiles":[]}');
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'missing_profile_sections',
+        message: 'Config input must contain agents or categories',
+        path: [],
+        line: 1,
+        column: 1,
+      },
+    });
+    expect(result).not.toHaveProperty('value');
+  });
+
+  it('rejects malformed JSONC with the parser location and path', () => {
+    // Given
+    const input = encode(`{
+  "agents": {
+    "sisyphus":
+  }
+}`);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'syntax_error',
+        path: ['agents', 'sisyphus'],
+        line: 4,
+        column: 3,
+      },
+    });
+    expect(result).not.toHaveProperty('value');
+  });
+
+  it.each([
+    { label: 'null', text: 'null' },
+    { label: 'array', text: '[]' },
+    { label: 'string', text: '"hi"' },
+  ])('rejects a $label root', ({ text }) => {
+    // Given
+    const input = encode(text);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'root_not_object',
+        path: [],
+        line: 1,
+        column: 1,
+      },
+    });
+    expect(result).not.toHaveProperty('value');
+  });
+
+  it('rejects duplicate keys', () => {
+    // Given
+    const input = encode(`{
+  "agents": {},
+  "agents": {}
+}`);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'duplicate_key',
+        path: ['agents'],
+        line: 3,
+        column: 3,
+      },
+    });
+    expect(result).not.toHaveProperty('value');
+  });
+
+  it('accepts a leading UTF-8 BOM', () => {
+    // Given
+    const json = encode('{"agents":{}}');
+    const input = Uint8Array.from([0xef, 0xbb, 0xbf, ...json]);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { agents: {} },
+    });
+  });
+
+  it('rejects 5 MiB plus one byte before decoding', () => {
+    // Given
+    const input = new Uint8Array(MAX_PROFILE_TRANSFER_BYTES + 1);
+    input.fill(0xff);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'input_too_large', path: [] },
+    });
+    expect(result).not.toHaveProperty('value');
+  });
+
+  it('accepts JSONC comments and trailing commas', () => {
+    // Given
+    const input = encode(`{
+  // keep
+  "categories": { "quick": { "model": "fast" } },
+}`);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { categories: { quick: { model: 'fast' } } },
+    });
   });
 });

@@ -286,6 +286,39 @@ export class ProfileStore {
   }
 
   /**
+   * Create a new profile from a caller-supplied `{ agents?, categories? }` fragment.
+   * The fragment is deep-cloned so later mutations do not affect the stored profile.
+   * The active config is not read or modified. Throws the same duplicate-name error
+   * as `createProfile`.
+   */
+  async createProfileFromFragment(
+    name: string,
+    fragment: ProfileFragment,
+  ): Promise<Profile> {
+    const data = this.readProfilesFile();
+
+    if (data.profiles.some((p) => p.name === name)) {
+      throw new Error(`Profile "${name}" already exists`);
+    }
+
+    const now = new Date().toISOString();
+    const clone = cloneProfileFragment(fragment);
+
+    const profile: Profile = {
+      name,
+      agents: clone.agents,
+      categories: clone.categories,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    data.profiles.push(profile);
+    await this.writeProfilesFile(data);
+
+    return profile;
+  }
+
+  /**
    * Update an existing profile by merging a partial patch. The `name` field
    * in the patch is ignored — use `renameProfile` to rename.
    */

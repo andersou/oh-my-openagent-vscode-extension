@@ -78,12 +78,12 @@ Profiles live next to the active config in `oh-my-openagent.profiles.json`.
 - Click the `Oh My OpenAgent` activity bar icon (robot symbol).
 - Or run the command `Oh My OpenAgent: Open Agent Manager` from the Command Palette.
 
-The sidebar shows the active config file first, followed by three collapsible groups:
+The sidebar nests the tree under the active config file:
 
-- **Active config file** — the name of the file currently in use (e.g. `oh-my-openagent.json`). Hover to see the full resolved path. This helps when you have fallback configs across multiple files.
+- **Active config file** — the name of the file currently in use (e.g. `oh-my-openagent.json`). Hover to see the full resolved path. This helps when you have fallback configs across multiple files. It expands to show the active profile (when one is active) and, nested under it, the **Agents** and **Categories** groups. When no profile is active, **Agents** and **Categories** appear directly under the config file.
 - **Agents** — built-in agents; overridden agents are shown as override items.
 - **Categories** — built-in categories; overridden categories are shown as override items.
-- **Profiles** — saved snapshots of your agents and categories.
+- **Profiles** — saved snapshots of your agents and categories. A root-level sibling of the config file.
 
 Agents, categories, and profiles are expandable when they contain configured values:
 
@@ -117,12 +117,13 @@ Right-click items in the Models view for more options:
 - Profile-contained agent/category leaves reuse the same `Edit Agent` / `Edit Category` commands as the main tree.
 - On a modified active profile: `Save Active Profile` snapshots the current config back into that profile.
 - On the active config file item: `Edit Active Profile JSON` opens the active config's `agents`/`categories` as JSON.
+- On the Profiles group header: `Create Profile from Config File…`, `Import Profiles`, or `Export All Profiles`.
 
 The view title also provides `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` buttons.
 
 ## Commands
 
-The extension contributes 15 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
+The extension contributes 16 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Refresh`, `Create Profile`, `Create Profile from Config File…`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
 
 | Command | Availability | What it does |
 | --- | --- | --- |
@@ -131,6 +132,7 @@ The extension contributes 15 commands. All are prefixed with **Oh My OpenAgent**
 | `Edit Category` | Contextual | Opens the editor for the selected category. |
 | `Refresh` | Command Palette and view title | Refreshes the Models tree from disk. |
 | `Create Profile` | Command Palette and view title | Creates a new profile from the current config. |
+| `Create Profile from Config File…` | Command Palette | Creates a profile from a `.json` or `.jsonc` Oh My OpenAgent config file's `agents` and `categories` sections. The active config is not modified. |
 | `Activate Profile` | Contextual | Applies the selected profile to the active config. |
 | `Rename Profile` | Contextual | Renames the selected profile. |
 | `Duplicate Profile` | Contextual | Creates a copy of the selected profile. |
@@ -153,6 +155,8 @@ Profiles are named snapshots of the `agents` and `categories` sections of your a
 3. Optionally enter a description.
 
 The new profile captures the current agents and categories exactly as they are on disk.
+
+To create a profile from another config file instead of the active config, use `Create Profile from Config File…` (Command Palette or right-click the Profiles group header). It extracts `agents` and `categories` from any Oh My OpenAgent `.json`/`.jsonc` config — a full `oh-my-openagent.jsonc` works; other top-level keys are ignored — and never modifies the active config.
 
 ### Activate a profile
 
@@ -234,7 +238,7 @@ The extension follows a clean layered architecture with strict separation of con
 ```
 extension.ts  (activation orchestrator)
      |
-     ├── commands.ts  (15 command registrations)
+     ├── commands.ts  (16 command registrations)
      |
      ├── profileTransferCommands.ts  (import/export/JSON-edit handlers)
      │   ├── profileTransferCommandHandlers.ts

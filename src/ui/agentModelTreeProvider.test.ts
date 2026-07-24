@@ -94,6 +94,21 @@ function makeProfileStoreStub(
   } as unknown as ProfileStore;
 }
 
+function findGroup(
+  provider: AgentModelTreeProvider,
+  group: 'agents' | 'categories' | 'profiles',
+): import('./agentModelTreeProvider.js').AgentModelTreeItem | undefined {
+  const search = (items: import('./agentModelTreeProvider.js').AgentModelTreeItem[]): import('./agentModelTreeProvider.js').AgentModelTreeItem | undefined => {
+    for (const item of items) {
+      if (item.group === group) return item;
+      const found = search(provider.getChildren(item));
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return search(provider.getChildren());
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -109,27 +124,32 @@ describe('AgentModelTreeProvider', () => {
     provider = new AgentModelTreeProvider(configStore, profileStore);
   });
 
-  it('returns four top-level items at the root', () => {
+  it('returns two top-level items at the root: configFile then Profiles group', () => {
     const roots = provider.getChildren();
-    expect(roots).toHaveLength(4);
+    expect(roots).toHaveLength(2);
     expect(roots[0].kind).toBe('configFile');
     expect(roots[0].label).toBe('oh-my-openagent.json');
     expect(roots[0].tooltip).toBe('/fake/path/oh-my-openagent.json');
-    expect(roots.slice(1).map((r) => r.label)).toEqual([
-      'Agents',
-      'Categories',
-      'Profiles',
+    expect(roots[0].collapsibleState).toBe(2);
+    expect(roots[1].kind).toBe('group');
+    expect(roots[1].label).toBe('Profiles');
+    expect(roots[1].group).toBe('profiles');
+  });
+
+  it('exposes Agents and Categories under the configFile when no profile is active', () => {
+    profileStore = makeProfileStoreStub([], undefined);
+    provider = new AgentModelTreeProvider(configStore, profileStore);
+    const configFile = provider.getChildren()[0];
+    expect(configFile.kind).toBe('configFile');
+    const children = provider.getChildren(configFile);
+    expect(children.map((c) => ({ label: c.label, group: c.group, kind: c.kind }))).toEqual([
+      { label: 'Agents', group: 'agents', kind: 'group' },
+      { label: 'Categories', group: 'categories', kind: 'group' },
     ]);
-    expect(roots.slice(1).map((r) => r.group)).toEqual([
-      'agents',
-      'categories',
-      'profiles',
-    ]);
-    expect(roots.slice(1).every((r) => r.kind === 'group')).toBe(true);
   });
 
   it('returns one leaf per built-in agent with contextValue "agent" by default', () => {
-    const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+    const group = findGroup(provider, 'agents')!;
     const leaves = provider.getChildren(group);
     expect(leaves).toHaveLength(BUILTIN_AGENTS.length);
     for (const leaf of leaves) {
@@ -144,7 +164,7 @@ describe('AgentModelTreeProvider', () => {
       sisyphus: { model: 'openai/gpt-4' },
     });
     provider = new AgentModelTreeProvider(configStore, profileStore);
-    const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+    const group = findGroup(provider, 'agents')!;
     const leaves = provider.getChildren(group);
     const sisyphus = leaves.find((l) => l.nodeName === 'sisyphus')!;
     expect(sisyphus.contextValue).toBe('agentOverride');
@@ -152,9 +172,7 @@ describe('AgentModelTreeProvider', () => {
   });
 
   it('uses contextValue "category" for built-in categories without overrides', () => {
-    const group = provider
-      .getChildren()!
-      .find((g) => g.group === 'categories')!;
+    const group = findGroup(provider, 'categories')!;
     const leaves = provider.getChildren(group);
     expect(leaves).toHaveLength(BUILTIN_CATEGORIES.length);
     for (const leaf of leaves) {
@@ -168,9 +186,7 @@ describe('AgentModelTreeProvider', () => {
       deep: { model: 'deep/model' },
     });
     provider = new AgentModelTreeProvider(configStore, profileStore);
-    const group = provider
-      .getChildren()!
-      .find((g) => g.group === 'categories')!;
+    const group = findGroup(provider, 'categories')!;
     const leaves = provider.getChildren(group);
     const deep = leaves.find((l) => l.nodeName === 'deep')!;
     expect(deep.contextValue).toBe('categoryOverride');
@@ -185,7 +201,7 @@ describe('AgentModelTreeProvider', () => {
     profileStore = makeProfileStoreStub(profiles, 'fast');
     provider = new AgentModelTreeProvider(configStore, profileStore);
 
-    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const group = findGroup(provider, 'profiles')!;
     const leaves = provider.getChildren(group);
     expect(leaves.map((l) => l.nodeName)).toEqual(['fast', 'careful']);
     for (const leaf of leaves) {
@@ -199,7 +215,7 @@ describe('AgentModelTreeProvider', () => {
     profileStore = makeProfileStoreStub(profiles, undefined);
     provider = new AgentModelTreeProvider(configStore, profileStore);
 
-    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const group = findGroup(provider, 'profiles')!;
     const leaves = provider.getChildren(group);
     expect(leaves[0].kind).toBe('noActiveProfile');
     expect(leaves[0].label).toBe('No active profile');
@@ -211,7 +227,7 @@ describe('AgentModelTreeProvider', () => {
     profileStore = makeProfileStoreStub(profiles, 'fast');
     provider = new AgentModelTreeProvider(configStore, profileStore);
 
-    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const group = findGroup(provider, 'profiles')!;
     const leaves = provider.getChildren(group);
     expect(leaves.some((l) => l.kind === 'noActiveProfile')).toBe(false);
     expect(leaves.map((l) => l.nodeName)).toEqual(['fast']);
@@ -221,7 +237,7 @@ describe('AgentModelTreeProvider', () => {
     profileStore = makeProfileStoreStub([], undefined);
     provider = new AgentModelTreeProvider(configStore, profileStore);
 
-    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const group = findGroup(provider, 'profiles')!;
     const leaves = provider.getChildren(group);
     expect(leaves).toHaveLength(1);
     expect(leaves[0].kind).toBe('noActiveProfile');
@@ -243,7 +259,7 @@ describe('AgentModelTreeProvider', () => {
     profileStore = makeProfileStoreStub(profiles, 'fast');
     provider = new AgentModelTreeProvider(configStore, profileStore);
 
-    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const group = findGroup(provider, 'profiles')!;
     const fast = provider.getChildren(group).find((l) => l.nodeName === 'fast')!;
     expect(fast.collapsibleState).toBe(1);
 
@@ -302,7 +318,7 @@ describe('AgentModelTreeProvider', () => {
     profileStore = makeProfileStoreStub(profiles, 'careful');
     provider = new AgentModelTreeProvider(configStore, profileStore);
 
-    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const group = findGroup(provider, 'profiles')!;
     const leaves = provider.getChildren(group);
     const fast = leaves.find((l) => l.nodeName === 'fast')!;
     const careful = leaves.find((l) => l.nodeName === 'careful')!;
@@ -319,7 +335,7 @@ describe('AgentModelTreeProvider', () => {
       'ghost', // not in the list
     );
     provider = new AgentModelTreeProvider(configStore, profileStore);
-    const group = provider.getChildren()!.find((g) => g.group === 'profiles')!;
+    const group = findGroup(provider, 'profiles')!;
     const leaves = provider.getChildren(group);
     expect(leaves[0].description).toBeUndefined();
   });
@@ -356,9 +372,7 @@ describe('AgentModelTreeProvider', () => {
   });
 
   it('returns no children for leaf elements', () => {
-    const agentGroup = provider
-      .getChildren()!
-      .find((g) => g.group === 'agents')!;
+    const agentGroup = findGroup(provider, 'agents')!;
     const [firstAgent] = provider.getChildren(agentGroup);
     expect(provider.getChildren(firstAgent)).toEqual([]);
   });
@@ -380,7 +394,7 @@ describe('AgentModelTreeProvider', () => {
         },
       });
       provider = new AgentModelTreeProvider(configStore, profileStore);
-      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const group = findGroup(provider, 'agents')!;
       const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
       expect(sisyphus.tooltip).toContain('model: openai/gpt-4');
       expect(sisyphus.tooltip).toContain('variant=max');
@@ -397,7 +411,7 @@ describe('AgentModelTreeProvider', () => {
         },
       });
       provider = new AgentModelTreeProvider(configStore, profileStore);
-      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const group = findGroup(provider, 'agents')!;
       const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
       expect(sisyphus.tooltip).toContain('Fallback models: openai/gpt-4o, anthropic/claude-haiku');
     });
@@ -413,7 +427,7 @@ describe('AgentModelTreeProvider', () => {
         },
       });
       provider = new AgentModelTreeProvider(configStore, profileStore);
-      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const group = findGroup(provider, 'agents')!;
       const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
       expect(sisyphus.tooltip).toContain('Fallback models: openai/gpt-4o, anthropic/claude-opus');
     });
@@ -441,7 +455,7 @@ describe('AgentModelTreeProvider', () => {
       });
       provider = new AgentModelTreeProvider(configStore, profileStore);
 
-      const group = provider.getChildren()!.find((g) => g.group === 'agents')!;
+      const group = findGroup(provider, 'agents')!;
       const sisyphus = provider.getChildren(group).find((l) => l.nodeName === 'sisyphus')!;
       expect(sisyphus.collapsibleState).toBe(1);
 
@@ -477,7 +491,7 @@ describe('AgentModelTreeProvider', () => {
         },
       });
       provider = new AgentModelTreeProvider(configStore, profileStore);
-      const group = provider.getChildren()!.find((g) => g.group === 'categories')!;
+      const group = findGroup(provider, 'categories')!;
       const deep = provider.getChildren(group).find((l) => l.nodeName === 'deep')!;
       expect(deep.tooltip).toContain('model: deep/model');
       expect(deep.tooltip).toContain('top_p=0.9');
@@ -498,7 +512,7 @@ describe('AgentModelTreeProvider', () => {
       });
       provider = new AgentModelTreeProvider(configStore, profileStore);
 
-      const group = provider.getChildren()!.find((g) => g.group === 'categories')!;
+      const group = findGroup(provider, 'categories')!;
       const deep = provider.getChildren(group).find((l) => l.nodeName === 'deep')!;
       expect(deep.collapsibleState).toBe(1);
 
@@ -517,21 +531,29 @@ describe('AgentModelTreeProvider', () => {
   });
 
   describe('active profile indicator', () => {
-    it('omits the active-profile item when no profile is active', () => {
+    it('omits the active-profile item when no profile is active and keeps groups under configFile', () => {
       profileStore = makeProfileStoreStub([{ name: 'fast' }], undefined);
       provider = new AgentModelTreeProvider(configStore, profileStore);
       const roots = provider.getChildren();
+      expect(roots).toHaveLength(2);
+      expect(roots[0].kind).toBe('configFile');
       expect(roots.some((r) => r.kind === 'activeProfile')).toBe(false);
-      expect(roots).toHaveLength(4);
+      const configChildren = provider.getChildren(roots[0]);
+      expect(configChildren.map((c) => ({ label: c.label, group: c.group, kind: c.kind }))).toEqual([
+        { label: 'Agents', group: 'agents', kind: 'group' },
+        { label: 'Categories', group: 'categories', kind: 'group' },
+      ]);
     });
 
-    it('shows the active profile name below the config file when one is active', () => {
+    it('shows the active profile nested under the config file with Expanded state', () => {
       profileStore = makeProfileStoreStub([{ name: 'fast' }], 'fast', false);
       provider = new AgentModelTreeProvider(configStore, profileStore);
       const roots = provider.getChildren();
+      expect(roots).toHaveLength(2);
       expect(roots[0].kind).toBe('configFile');
-      const activeItem = roots[1];
+      const activeItem = provider.getChildren(roots[0])[0];
       expect(activeItem.kind).toBe('activeProfile');
+      expect(activeItem.collapsibleState).toBe(2);
       expect(activeItem.label).toBe('fast');
       expect(activeItem.contextValue).toBe('activeProfile');
       expect(activeItem.nodeName).toBe('fast');
@@ -541,14 +563,13 @@ describe('AgentModelTreeProvider', () => {
     it('appends "*" and flips contextValue when the active profile is modified', () => {
       profileStore = makeProfileStoreStub([{ name: 'fast' }], 'fast', true);
       provider = new AgentModelTreeProvider(configStore, profileStore);
-      const activeItem = provider
-        .getChildren()
-        .find((r) => r.kind === 'activeProfile')!;
+      const roots = provider.getChildren();
+      const activeItem = provider.getChildren(roots[0])[0];
       expect(activeItem.label).toBe('fast *');
       expect(activeItem.contextValue).toBe('activeProfileModified');
     });
 
-    it('shows a collapsible summary of modifications when dirty', () => {
+    it('shows a collapsible summary of modifications when dirty, then Agents and Categories groups', () => {
       const modifications: ActiveProfileModification[] = [
         { group: 'agents', name: 'sisyphus', type: 'modified', changedFields: ['model', 'temperature'] },
         { group: 'categories', name: 'deep', type: 'added' },
@@ -560,21 +581,28 @@ describe('AgentModelTreeProvider', () => {
         modifications,
       );
       provider = new AgentModelTreeProvider(configStore, profileStore);
-      const activeItem = provider
-        .getChildren()
-        .find((r) => r.kind === 'activeProfile')!;
-      expect(activeItem.collapsibleState).toBe(1);
+      const roots = provider.getChildren();
+      const activeItem = provider.getChildren(roots[0])[0];
+      expect(activeItem.collapsibleState).toBe(2);
       expect(activeItem.children?.map((child) => child.label)).toEqual([
         '~ agent sisyphus: model, temperature',
         '+ category deep',
+        'Agents',
+        'Categories',
       ]);
     });
 
     it('omits the active-profile item when the active name is not in the list', () => {
       profileStore = makeProfileStoreStub([{ name: 'fast' }], 'ghost');
       provider = new AgentModelTreeProvider(configStore, profileStore);
+      const roots = provider.getChildren();
+      const configChildren = provider.getChildren(roots[0]);
+      expect(configChildren.map((c) => ({ label: c.label, group: c.group, kind: c.kind }))).toEqual([
+        { label: 'Agents', group: 'agents', kind: 'group' },
+        { label: 'Categories', group: 'categories', kind: 'group' },
+      ]);
       expect(
-        provider.getChildren().some((r) => r.kind === 'activeProfile'),
+        roots.some((r) => r.kind === 'activeProfile'),
       ).toBe(false);
     });
   });

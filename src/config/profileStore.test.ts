@@ -200,6 +200,111 @@ describe('ProfileStore', () => {
   });
 
   // -----------------------------------------------------------------------
+  // createProfileFromFragment
+  // -----------------------------------------------------------------------
+
+  describe('createProfileFromFragment', () => {
+    it('creates a profile whose stored agents and categories equal the fragment', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const fragment: ProfileFragment = {
+        agents: {
+          sisyphus: { model: 'fragment/sisyphus' },
+          explore: { model: 'fragment/explore' },
+        },
+        categories: { deep: { model: 'fragment/deep' } },
+      };
+
+      const profile = await profileStore.createProfileFromFragment(
+        'from-fragment',
+        fragment,
+      );
+
+      expect(profile.name).toBe('from-fragment');
+      expect(profile.agents).toEqual(fragment.agents);
+      expect(profile.categories).toEqual(fragment.categories);
+      expect(profile.createdAt).toBeDefined();
+      expect(profile.updatedAt).toBeDefined();
+      expect(profile.createdAt).toBe(profile.updatedAt);
+
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles).toHaveLength(1);
+      expect(onDisk.profiles[0].agents).toEqual(fragment.agents);
+      expect(onDisk.profiles[0].categories).toEqual(fragment.categories);
+    });
+
+    it('throws when creating a profile with a duplicate name', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const fragment: ProfileFragment = {
+        agents: { sisyphus: { model: 'x' } },
+      };
+
+      await profileStore.createProfileFromFragment('dup', fragment);
+
+      await expect(
+        profileStore.createProfileFromFragment('dup', fragment),
+      ).rejects.toThrow('Profile "dup" already exists');
+    });
+
+    it('creates a profile from an empty fragment', async () => {
+      createStores();
+      const fragment: ProfileFragment = {};
+
+      const profile = await profileStore.createProfileFromFragment(
+        'empty-fragment',
+        fragment,
+      );
+
+      expect(profile.name).toBe('empty-fragment');
+      expect(profile.agents).toBeUndefined();
+      expect(profile.categories).toBeUndefined();
+    });
+
+    it('deep-clones the fragment so caller mutations do not affect the store', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      const fragment: ProfileFragment = {
+        agents: { sisyphus: { model: 'before' } },
+      };
+
+      await profileStore.createProfileFromFragment('clone', fragment);
+      fragment.agents!.sisyphus!.model = 'after';
+
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles[0].agents.sisyphus.model).toBe('before');
+      expect(profileStore.getProfile('clone')!.agents!.sisyphus!.model).toBe(
+        'before',
+      );
+    });
+
+    it('sets createdAt and updatedAt to ISO strings matching createProfile semantics', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+
+      const profile = await profileStore.createProfileFromFragment('dated', {
+        agents: { sisyphus: { model: 'dated/model' } },
+      });
+
+      expect(profile.createdAt).toBe(profile.updatedAt);
+      expect(typeof profile.createdAt).toBe('string');
+      expect(new Date(profile.createdAt!).toISOString()).toBe(profile.createdAt);
+    });
+
+    it('emits exactly one change event and writes the sidecar once', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.createProfileFromFragment('event', {
+        agents: { sisyphus: { model: 'event/model' } },
+      });
+
+      expect(changes).toBe(1);
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.profiles).toHaveLength(1);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // updateProfile
   // -----------------------------------------------------------------------
 
