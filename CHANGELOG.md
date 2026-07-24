@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-23
+
+First stable release in the 0.5 line, promoting the work from `0.5.0-beta.1` through `0.5.0-beta.4`. Highlights: full profile import/export and JSONC editing, a redesigned model-routing editor with `main_overrides`, a new `Create Profile from Config File…` command, a restructured sidebar tree, and a cleaner command surface.
+
+### Features
+
+- Add profile import and export for single `{ agents, categories }` fragments and full `{ version: 1, profiles: [...] }` sidecars, with extend-or-replace import semantics and name-collision resolution.
+- Add `Import Profiles`, `Export Profile`, `Export All Profiles`, `Edit Profile JSON`, and `Edit Active Profile JSON` commands.
+- Add a JSONC profile editor webview and host protocol for editing active and saved profiles as JSON.
+- Add strict JSONC parsing for transfer inputs with byte-size limits, UTF-8/BOM handling, duplicate-key detection, and CR line-ending support.
+- Add atomic URI-based transfer I/O using VS Code `workspace.fs` for local and non-file targets.
+- Add transactional profile imports that perform a single sidecar write and emit one change event.
+- Redesign inherited model routing so Main and fallback cards share defaults cleanly; add `main_overrides` for durable Main-specific advanced settings.
+- Enhance model-card position labels for Main and fallback states.
+- Add target-aware messaging and a dirty-state lifecycle for profile-scoped JSON edits.
+- Add `Create Profile from Config File…` command: pick any Oh My OpenAgent `.json`/`.jsonc` config and create a profile from its `agents`/`categories` sections. Other top-level keys (e.g. `$schema`) are ignored, so a full `oh-my-openagent.jsonc` can be imported directly. The profile name is pre-filled from the filename with inline duplicate validation. The active config is never modified.
+- Add right-click context menu on the Profiles group header with `Create Profile from Config File…`, `Import Profiles`, and `Export All Profiles`.
+- Restructure the sidebar tree: the active config file expands to the active profile, with Agents and Categories nested beneath it; Profiles remains a root-level group. Parent nodes default to expanded.
+- Increase the profile JSON editor textarea initial height to 14 rows, with vertical resize enabled and monospace styling.
+
+### Removals
+
+- Remove the `Remove Override` right-click action on agent and category sidebar items, along with its command handler and menu wiring.
+
+### Fixes
+
+- Canonicalize export serialization to sorted, two-space JSON with only safe data values.
+- Preserve unknown rejection causes during atomic transfer I/O instead of dropping them.
+- Sync the active profile after saving an edited profile JSON document.
+- Align pinned validation rules with transfer and editor contracts.
+
+### Chores/Refactors
+
+- Promote version to stable `0.5.0`.
+
+For the full detail of each pre-release, see the beta entries below.
+
 ## [0.5.0-beta.4] - 2026-07-23
 
 This release makes profiles easier to create and manage: a new command builds a profile from any Oh My OpenAgent config file (a full `oh-my-openagent.jsonc` works out of the box), the Profiles group header gained a right-click menu with the profile management commands, the sidebar tree was re-nested for a clearer hierarchy, and the profile JSON editor textarea is much taller. The rarely used and accident-prone `Remove Override` context action was removed.
@@ -80,5 +117,6 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[0.5.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.4.0...v0.5.0
 [0.5.0-beta.4]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0-beta.3...v0.5.0-beta.4
-[0.5.0-beta.3]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.4.0...v0.5.0-beta.3
+[0.5.0-beta.3]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0-beta.2...v0.5.0-beta.3
