@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0-beta.1] - 2026-07-23
+
+This pre-release adds descriptive hover tooltips to the sidebar: agents and categories now explain what they are for, on top of the configuration details the tooltip already showed.
+
+### Features
+
+- Add description tooltips for the 11 built-in agents and 8 built-in categories. Hovering a sidebar leaf now shows the item name, a short description of its role (e.g. `sisyphus — Main orchestrator. Plans, delegates, drives to completion.`), then the existing model/params/fallback configuration details unchanged. Descriptions live in `schema.ts` as typed `BUILTIN_AGENT_DESCRIPTIONS` / `BUILTIN_CATEGORY_DESCRIPTIONS` records.
+
+### Tests
+
+- Add 3 tooltip tests covering a built-in agent, an agent override, and a category override.
+
+### Chores/Refactors
+
+- Bump version to `0.6.0-beta.1`.
+
 ## [0.5.0-beta.4] - 2026-07-23
 
 This release makes profiles easier to create and manage: a new command builds a profile from any Oh My OpenAgent config file (a full `oh-my-openagent.jsonc` works out of the box), the Profiles group header gained a right-click menu with the profile management commands, the sidebar tree was re-nested for a clearer hierarchy, and the profile JSON editor textarea is much taller. The rarely used and accident-prone `Remove Override` context action was removed.
@@ -80,5 +96,6 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[0.6.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0...v0.6.0-beta.1
 [0.5.0-beta.4]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0-beta.3...v0.5.0-beta.4
 [0.5.0-beta.3]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.4.0...v0.5.0-beta.3
