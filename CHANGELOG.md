@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0-beta.4] - 2026-07-23
+
+This release makes profiles easier to create and manage: a new command builds a profile from any Oh My OpenAgent config file (a full `oh-my-openagent.jsonc` works out of the box), the Profiles group header gained a right-click menu with the profile management commands, the sidebar tree was re-nested for a clearer hierarchy, and the profile JSON editor textarea is much taller. The rarely used and accident-prone `Remove Override` context action was removed.
+
+### Features
+
+- Add `Create Profile from Config File…` command: pick any Oh My OpenAgent `.json`/`.jsonc` config and create a profile from its `agents`/`categories` sections. Other top-level keys (e.g. `$schema`) are ignored, so a full `oh-my-openagent.jsonc` can be imported directly. The profile name is pre-filled from the filename with inline duplicate validation. The active config is never modified.
+- Add right-click context menu on the Profiles group header with `Create Profile from Config File…`, `Import Profiles`, and `Export All Profiles`.
+- Restructure the sidebar tree: the active config file expands to the active profile, with Agents and Categories nested beneath it; Profiles remains a root-level group. Parent nodes default to expanded.
+- Increase the profile JSON editor textarea initial height to 14 rows, with vertical resize enabled and monospace styling.
+
+### Removals
+
+- Remove the `Remove Override` right-click action on agent and category sidebar items, along with its command handler and menu wiring.
+
+### Tests
+
+- Add 12 tests for the config-file fragment parser (full-config extraction, JSONC tolerance, duplicate keys, size/BOM limits).
+- Add 6 tests for `ProfileStore.createProfileFromFragment`, including duplicate-name rejection verified by temporary revert.
+- Add 7 command-handler tests for create-from-config with a mocked VS Code context, plus menu-wiring assertions for the Profiles group header.
+- Update the tree provider tests for the new nested sidebar structure.
+
+### Documentation
+
+- Document the new command, the Profiles group context menu, and the restructured sidebar in README.
+
+### Chores/Refactors
+
+- Bump version to `0.5.0-beta.4`.
+
 ## [0.5.0-beta.3] - 2026-07-23
 
 This release adds profile import/export and JSONC editing to the Oh My OpenAgent VS Code extension. You can now move individual profiles or your entire sidecar in and out as JSON/JSONC, edit saved profiles or the active config's agents/categories directly as JSON, and import full sidecars with extend-or-replace semantics. The model editor also got a routing overhaul: position 1 is always Main, later cards are fallbacks, and Main-specific advanced settings are preserved independently through `main_overrides`.
@@ -50,4 +80,5 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[0.5.0-beta.4]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0-beta.3...v0.5.0-beta.4
 [0.5.0-beta.3]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.4.0...v0.5.0-beta.3
