@@ -94,6 +94,34 @@ function isJsonObject(value: unknown): value is UnvalidatedJsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Deep-merge two plain JSON values: objects merge key-wise, arrays/scalars replace. */
+function deepMergeJson(base: unknown, overlay: unknown): unknown {
+  if (isJsonObject(base) && isJsonObject(overlay)) {
+    const merged: Record<string, unknown> = { ...base };
+    for (const [key, overlayValue] of Object.entries(overlay)) {
+      merged[key] = Object.hasOwn(merged, key)
+        ? deepMergeJson(merged[key], overlayValue)
+        : overlayValue;
+    }
+    return merged;
+  }
+  return overlay;
+}
+
+/**
+ * Combine a base section with its `[opencode]` overlay. Returns `undefined`
+ * when neither is present; deep-merges (overlay wins) when both are objects.
+ */
+function deepMergeSection(base: unknown, overlay: unknown): unknown {
+  if (base === undefined) {
+    return overlay;
+  }
+  if (overlay === undefined) {
+    return base;
+  }
+  return deepMergeJson(base, overlay);
+}
+
 function getParseErrorLocation(
   text: string,
   parseError: ParseError,
@@ -289,11 +317,15 @@ export function parseProfileTransfer(
   };
 }
 
-/** Parse an oh-my-openagent config byte fragment and extract only the agent/category sections.
+/** Parse an omo.dev / oh-my-openagent config byte fragment and extract only the agent/category sections.
  *
  * Unlike {@link parseProfileTransfer}, this accepts config roots that also contain
  * `profiles` or `version` sidecar keys. Only `agents` and `categories` are returned;
- * all other top-level keys are ignored. At least one of the two sections must be present.
+ * all other top-level keys are ignored. At least one of the two sections must be
+ * present, either at the root (legacy flat shape) or inside a `[opencode]` block
+ * (new omo.jsonc shape). When both the root and `[opencode]` carry a section,
+ * they are deep-merged base-first with `[opencode]` winning (plain objects merge,
+ * arrays and scalars replace).
  */
 export function parseConfigFragmentBytes(
   input: Uint8Array,
@@ -375,10 +407,16 @@ export function parseConfigFragmentBytes(
     };
   }
 
-  const hasAgents = Object.hasOwn(value, 'agents');
-  const hasCategories = Object.hasOwn(value, 'categories');
+  const opencodeBlock = value['[opencode]'];
+  const opencodeSections = isJsonObject(opencodeBlock) ? opencodeBlock : {};
 
-  if (!hasAgents && !hasCategories) {
+  const agents = deepMergeSection(value.agents, opencodeSections.agents);
+  const categories = deepMergeSection(
+    value.categories,
+    opencodeSections.categories,
+  );
+
+  if (agents === undefined && categories === undefined) {
     return {
       ok: false,
       error: {
@@ -394,8 +432,8 @@ export function parseConfigFragmentBytes(
   return {
     ok: true,
     value: {
-      ...(hasAgents ? { agents: value.agents } : {}),
-      ...(hasCategories ? { categories: value.categories } : {}),
+      ...(agents !== undefined ? { agents } : {}),
+      ...(categories !== undefined ? { categories } : {}),
     },
   };
 }

@@ -23,7 +23,8 @@
   let overrideCount = $derived(Object.values(card.overrides).filter((setting) => setting.mode === 'override').length);
   let variants = $derived(optionValues(metadata?.variants, valueFor('variant')));
   let reasoning = $derived(reasoningValues(metadata?.variants, valueFor('reasoningEffort')));
-  let hasAdvancedError = $derived(Boolean(errors.variant || errors.reasoningEffort || errors.temperature || errors.top_p || errors.maxTokens || errors.thinking || errors.budgetTokens));
+  let reasoningOptions = $derived(newReasoningValues(valueFor('reasoning')));
+  let hasAdvancedError = $derived(Boolean(errors.variant || errors.reasoning || errors.reasoningEffort || errors.temperature || errors.top_p || errors.maxTokens || errors.thinking || errors.budgetTokens));
 
   function optionValues(values, current) {
     const options = values && typeof values === 'object' && !Array.isArray(values) ? Object.keys(values) : [];
@@ -38,6 +39,12 @@
       for (const variant of Object.values(values)) if (variant && typeof variant === 'object' && typeof variant.reasoningEffort === 'string') options.add(variant.reasoningEffort);
     }
     return [...options];
+  }
+
+  function newReasoningValues(current) {
+    const options = ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'auto'];
+    if (current && !options.includes(String(current))) options.push(String(current));
+    return options;
   }
 
   function valueFor(key) {
@@ -153,7 +160,19 @@
             {#if errors.variant}<p class="field__error">{errors.variant}</p>{/if}
           </div>
           <div class="field">
-            <label class="field__label" for={`reasoning-mode-${card.uid}`}>Reasoning effort</label>
+            <label class="field__label" for={`new-reasoning-mode-${card.uid}`}>Reasoning</label>
+            <select class="field__input" id={`new-reasoning-mode-${card.uid}`} name="reasoning-mode" value={isOverride('reasoning') ? 'override' : 'inherit'} onchange={(event) => changeMode('reasoning', event, '')}>
+              <option value="inherit">Inherit default</option><option value="override">Override</option>
+            </select>
+            {#if isOverride('reasoning')}
+              <select class="field__input" value={String(overrideValue('reasoning', ''))} disabled={!reasoningSupported} onchange={(event) => changeValue('reasoning', event)}>
+                {#each reasoningOptions as option}<option value={option}>{option || '(default)'}</option>{/each}
+              </select>
+            {:else}<input class="field__input" value={displayValue('reasoning')} disabled />{/if}
+            {#if errors.reasoning}<p class="field__error">{errors.reasoning}</p>{/if}
+          </div>
+          <div class="field">
+            <label class="field__label" for={`reasoning-mode-${card.uid}`}>Reasoning effort (legacy)</label>
             <select class="field__input" id={`reasoning-mode-${card.uid}`} name="reasoningEffort-mode" value={isOverride('reasoningEffort') ? 'override' : 'inherit'} onchange={(event) => changeMode('reasoningEffort', event, '')}>
               <option value="inherit">Inherit default</option><option value="override">Override</option>
             </select>

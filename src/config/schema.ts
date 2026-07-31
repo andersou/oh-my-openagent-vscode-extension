@@ -61,6 +61,15 @@ export type ReasoningEffort =
   | 'high'
   | 'xhigh'
   | 'max';
+export type Reasoning =
+  | 'off'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+  | 'auto';
 export type TextVerbosity = 'low' | 'medium' | 'high';
 
 export interface ThinkingConfig {
@@ -71,11 +80,13 @@ export interface ThinkingConfig {
 export interface ModelVariantConfig {
   model?: string;
   variant?: string;
+  reasoning?: Reasoning;
 }
 
 export interface FallbackModelConfig {
   model: string;
   variant?: string;
+  reasoning?: Reasoning;
   reasoningEffort?: ReasoningEffort;
   temperature?: number;
   top_p?: number;
@@ -107,6 +118,7 @@ export interface AgentConfig {
   temperature?: number;
   top_p?: number;
   maxTokens?: number;
+  reasoning?: Reasoning;
   reasoningEffort?: ReasoningEffort;
   thinking?: ThinkingConfig;
   prompt?: string;
@@ -134,6 +146,7 @@ export interface CategoryConfig {
   temperature?: number;
   top_p?: number;
   maxTokens?: number;
+  reasoning?: Reasoning;
   reasoningEffort?: ReasoningEffort;
   thinking?: ThinkingConfig;
   textVerbosity?: TextVerbosity;

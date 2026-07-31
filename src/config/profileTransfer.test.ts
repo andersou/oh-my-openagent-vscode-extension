@@ -19,7 +19,7 @@ describe('profile transfer parsing', () => {
       path.join(os.tmpdir(), 'omo-transfer-parser-test-'),
     );
     fs.writeFileSync(
-      path.join(tempDirectory, 'oh-my-openagent.json'),
+      path.join(tempDirectory, 'omo.jsonc'),
       '{"agents":{"sisyphus":{"model":"recovered/model"}}} trailing',
       'utf-8',
     );
@@ -388,6 +388,143 @@ describe('parseConfigFragmentBytes', () => {
         categories: { quick: { model: 'quick/model' } },
       },
     });
+  });
+
+  it('extracts agents and categories from a new-shape omo.jsonc config, dropping other top-level keys', () => {
+    // Given
+    const input = encode(`{
+  "$schema": "https://omo.dev/schema/omo.schema.json",
+  "models": { "sisyphus/model": {} },
+  "_migrations": ["legacy-import"],
+  "[opencode]": {
+    "agents": { "sisyphus": { "model": "custom/model" } },
+    "categories": { "quick": { "model": "quick/model" } }
+  }
+}`);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        agents: { sisyphus: { model: 'custom/model' } },
+        categories: { quick: { model: 'quick/model' } },
+      },
+    });
+  });
+
+  it('merges base and [opencode] sections base-first with [opencode] winning', () => {
+    // Given: both root-level and [opencode]-nested agents/categories
+    const input = encode(`{
+  "agents": {
+    "sisyphus": {
+      "model": "base/model",
+      "prompt": "base prompt",
+      "tools": { "read": true, "write": true }
+    },
+    "explore": { "model": "base/explore" }
+  },
+  "categories": { "deep": { "model": "base/deep" } },
+  "[opencode]": {
+    "agents": {
+      "sisyphus": {
+        "model": "opencode/model",
+        "tools": { "write": false }
+      }
+    },
+    "categories": { "quick": { "model": "opencode/quick" } }
+  }
+}`);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then: [opencode] overrides per leaf, base-only entries survive
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        agents: {
+          sisyphus: {
+            model: 'opencode/model',
+            prompt: 'base prompt',
+            tools: { read: true, write: false },
+          },
+          explore: { model: 'base/explore' },
+        },
+        categories: {
+          deep: { model: 'base/deep' },
+          quick: { model: 'opencode/quick' },
+        },
+      },
+    });
+  });
+
+  it('replaces arrays and scalars instead of merging them when [opencode] overrides', () => {
+    // Given
+    const input = encode(`{
+  "agents": { "sisyphus": { "fallback_models": ["a", "b"], "temperature": 0.1 } },
+  "[opencode]": {
+    "agents": { "sisyphus": { "fallback_models": ["c"], "temperature": 0.9 } }
+  }
+}`);
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        agents: {
+          sisyphus: { fallback_models: ['c'], temperature: 0.9 },
+        },
+      },
+    });
+  });
+
+  it('takes sections from [opencode] alone when the root has none', () => {
+    // Given
+    const input = encode('{"[opencode]":{"categories":{"quick":{"model":"b"}}}}');
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { categories: { quick: { model: 'b' } } },
+    });
+  });
+
+  it('ignores a non-object [opencode] block', () => {
+    // Given
+    const input = encode('{"agents":{"a":{"model":"m"}},"[opencode]":"junk"}');
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { agents: { a: { model: 'm' } } },
+    });
+  });
+
+  it('rejects a root with neither agents nor categories even inside [opencode]', () => {
+    // Given
+    const input = encode('{"version":1,"[opencode]":{"model":"provider/model"}}');
+
+    // When
+    const result = parseConfigFragmentBytes(input);
+
+    // Then
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'missing_profile_sections', path: [] },
+    });
+    expect(result).not.toHaveProperty('value');
   });
 
   it('extracts an agents-only fragment', () => {

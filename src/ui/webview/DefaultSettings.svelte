@@ -3,6 +3,7 @@
   let capabilities = $derived(metadata?.capabilities ?? {});
   let variants = $derived(optionValues(metadata?.variants, defaults.variant));
   let reasoning = $derived(reasoningValues(metadata?.variants, defaults.reasoningEffort));
+  let reasoningOptions = $derived(newReasoningValues(defaults.reasoning));
   let samplingSupported = $derived(capabilities.temperature !== false);
   let reasoningSupported = $derived(capabilities.reasoning !== false);
   function hasValue(value) { return value !== undefined && value !== null && value !== ''; }
@@ -20,6 +21,12 @@
       for (const variant of Object.values(values)) if (variant && typeof variant === 'object' && typeof variant.reasoningEffort === 'string') options.add(variant.reasoningEffort);
     }
     return [...options];
+  }
+
+  function newReasoningValues(current) {
+    const options = ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'auto'];
+    if (current && !options.includes(String(current))) options.push(String(current));
+    return options;
   }
 
   function input(key, event) { onDefault(key, event.currentTarget.value === '' ? undefined : event.currentTarget.value); }
@@ -41,7 +48,8 @@
   <header class="editor__section-header"><h2 class="editor__section-title" id="default-settings-heading">Default generation settings</h2><p class="editor__section-desc">These shared defaults apply only to properties set to Inherit default.</p></header>
   <div class="field-grid">
     <div class="field"><label class="field__label" for="f-variant">Variant</label><select class="field__input" id="f-variant" value={defaults.variant ?? ''} onchange={(event) => input('variant', event)}>{#each variants as variant}<option value={variant}>{variant || '(default)'}</option>{/each}</select>{#if errors.variant}<p class="field__error">{errors.variant}</p>{/if}</div>
-    <div class="field"><label class="field__label" for="f-reasoning">Reasoning effort</label><select class="field__input" id="f-reasoning" value={defaults.reasoningEffort ?? ''} disabled={!reasoningSupported && !hasValue(defaults.reasoningEffort)} title={!reasoningSupported ? 'This model does not support reasoning controls.' : ''} onchange={(event) => input('reasoningEffort', event)}>{#each reasoning as effort}<option value={effort}>{effort || '(default)'}</option>{/each}</select>{#if errors.reasoningEffort}<p class="field__error">{errors.reasoningEffort}</p>{/if}</div>
+    <div class="field"><label class="field__label" for="f-new-reasoning">Reasoning</label><select class="field__input" id="f-new-reasoning" value={defaults.reasoning ?? ''} disabled={!reasoningSupported && !hasValue(defaults.reasoning)} title={!reasoningSupported ? 'This model does not support reasoning controls.' : ''} onchange={(event) => input('reasoning', event)}>{#each reasoningOptions as option}<option value={option}>{option || '(default)'}</option>{/each}</select>{#if errors.reasoning}<p class="field__error">{errors.reasoning}</p>{/if}</div>
+    <div class="field"><label class="field__label" for="f-reasoning">Reasoning effort (legacy)</label><select class="field__input" id="f-reasoning" value={defaults.reasoningEffort ?? ''} disabled={!reasoningSupported && !hasValue(defaults.reasoningEffort)} title={!reasoningSupported ? 'This model does not support reasoning controls.' : ''} onchange={(event) => input('reasoningEffort', event)}>{#each reasoning as effort}<option value={effort}>{effort || '(default)'}</option>{/each}</select>{#if errors.reasoningEffort}<p class="field__error">{errors.reasoningEffort}</p>{/if}</div>
   </div>
   <div class="field-grid field-grid--three">
     <div class="field"><label class="field__label" for="f-temperature">Temperature</label><input class="field__input" class:is-invalid={errors.temperature} type="number" id="f-temperature" step="0.1" min="0" max="2" value={defaults.temperature ?? ''} disabled={!samplingSupported && !hasValue(defaults.temperature)} title={samplingSupported ? '' : 'This model does not support temperature.'} oninput={(event) => input('temperature', event)} />{#if errors.temperature}<p class="field__error">{errors.temperature}</p>{/if}</div>

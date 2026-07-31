@@ -6,8 +6,10 @@ import { ConfigStore } from './configStore.js';
 
 const CONFIG_WITH_COMMENT = `{
   // this is a comment
-  "agents": {
-    "sisyphus": { "model": "old/model" },
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "old/model" },
+    },
   },
 }
 `;
@@ -19,7 +21,7 @@ describe('ConfigStore', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-config-test-'));
-    configPath = path.join(tmpDir, 'oh-my-openagent.json');
+    configPath = path.join(tmpDir, 'omo.jsonc');
   });
 
   afterEach(() => {
@@ -49,6 +51,50 @@ describe('ConfigStore', () => {
       expect(store.getConfigPath()).toBe(configPath);
     });
 
+    it('prefers omo.jsonc over omo.json', () => {
+      writeConfig('{}');
+      const jsonPath = path.join(tmpDir, 'omo.json');
+      fs.writeFileSync(jsonPath, '{}', 'utf-8');
+      store = new ConfigStore(tmpDir);
+      expect(store.getConfigPath()).toBe(configPath);
+    });
+
+    it('falls back to omo.json when omo.jsonc is absent', () => {
+      const jsonPath = path.join(tmpDir, 'omo.json');
+      fs.writeFileSync(
+        jsonPath,
+        '{ "[opencode]": { "agents": { "explore": { "model": "json/model" } } } }',
+        'utf-8',
+      );
+      store = new ConfigStore(tmpDir);
+      expect(store.getConfigPath()).toBe(jsonPath);
+      expect(store.getAgent('explore')?.model).toBe('json/model');
+    });
+
+    it('ignores a legacy oh-my-openagent.json in baseDir', () => {
+      fs.writeFileSync(
+        path.join(tmpDir, 'oh-my-openagent.json'),
+        '{ "agents": { "sisyphus": { "model": "legacy/model" } } }',
+        'utf-8',
+      );
+      store = new ConfigStore(tmpDir);
+      expect(store.getConfigPath()).toBe(configPath);
+      expect(store.getAgent('sisyphus')).toBeUndefined();
+
+      // A write creates omo.jsonc and leaves the legacy file untouched
+      return store
+        .updateConfig((draft) => {
+          draft.agents = { explore: { model: 'new/model' } };
+        })
+        .then(() => {
+          expect(fs.existsSync(configPath)).toBe(true);
+          expect(
+            fs.readFileSync(path.join(tmpDir, 'oh-my-openagent.json'), 'utf-8'),
+          ).toContain('legacy/model');
+          expect(store.getAgent('sisyphus')).toBeUndefined();
+        });
+    });
+
     it('parses JSONC with comments and trailing commas', () => {
       writeConfig(CONFIG_WITH_COMMENT);
       store = new ConfigStore(tmpDir);
@@ -71,8 +117,10 @@ describe('ConfigStore', () => {
 
     it('resolves a single category', () => {
       writeConfig(`{
-  "categories": {
-    "deep": { "model": "gpt-5" },
+  "[opencode]": {
+    "categories": {
+      "deep": { "model": "gpt-5" },
+    },
   },
 }
 `);
@@ -80,6 +128,39 @@ describe('ConfigStore', () => {
       const cat = store.getCategory('deep');
       expect(cat).toBeDefined();
       expect(cat!.model).toBe('gpt-5');
+    });
+
+    it('reads agents from the shared base when no [opencode] block exists', () => {
+      writeConfig(`{
+  "agents": {
+    "sisyphus": { "model": "base/model" }
+  }
+}
+`);
+      store = new ConfigStore(tmpDir);
+      expect(store.getAgent('sisyphus')?.model).toBe('base/model');
+    });
+
+    it('[opencode] overlay wins over base-level agents on read', () => {
+      writeConfig(`{
+  "agents": {
+    "sisyphus": { "model": "base/model", "temperature": 0.1 },
+    "explore": { "model": "base-only/model" }
+  },
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "overlay/model" }
+    }
+  }
+}
+`);
+      store = new ConfigStore(tmpDir);
+      // Overlay value wins for the overlapping entry
+      expect(store.getAgent('sisyphus')?.model).toBe('overlay/model');
+      // Base-only fields of the same agent deep-merge in
+      expect(store.getAgent('sisyphus')?.temperature).toBe(0.1);
+      // Base-only agents survive the overlay
+      expect(store.getAgent('explore')?.model).toBe('base-only/model');
     });
   });
 
@@ -106,7 +187,7 @@ describe('ConfigStore', () => {
       // Trailing commas survive (the original had one after "old/model" inside the object)
       expect(raw).toContain('},');
 
-      // The value was updated
+      // The value was updated inside the [opencode] block
       expect(raw).toContain('"new/model"');
       expect(raw).not.toContain('"old/model"');
 
@@ -126,6 +207,12 @@ describe('ConfigStore', () => {
       expect(raw).toContain('// this is a comment');
       expect(raw).toContain('"agent_order"');
       expect(raw).toContain('"sisyphus"');
+      // The new key lands inside the [opencode] block
+      const parsed = JSON.parse(
+        raw.replace(/\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1'),
+      );
+      expect(parsed['[opencode]'].agent_order).toEqual(['sisyphus']);
+      expect(parsed.agent_order).toBeUndefined();
     });
 
     it('creates the config file on first write if none exists', async () => {
@@ -138,15 +225,90 @@ describe('ConfigStore', () => {
       });
 
       const raw = readConfig();
+      expect(raw).toContain('"[opencode]"');
       expect(raw).toContain('"explore"');
       expect(raw).toContain('"new-model"');
+      // Writes land in the [opencode] block, not at the root
+      const parsed = JSON.parse(raw);
+      expect(parsed['[opencode]'].agents.explore.model).toBe('new-model');
+      expect(parsed.agents).toBeUndefined();
+    });
+
+    it('creates the [opencode] block in a fresh file and preserves sibling top-level keys', async () => {
+      writeConfig(`{
+  "teams": {
+    "core": { "members": ["a", "b"] }
+  }
+}
+`);
+      store = new ConfigStore(tmpDir);
+
+      await store.updateConfig((draft) => {
+        draft.agents = { explore: { model: 'fresh/model' } };
+      });
+
+      const raw = readConfig();
+      const parsed = JSON.parse(raw);
+      // The pre-existing sibling key is untouched
+      expect(parsed.teams).toEqual({ core: { members: ['a', 'b'] } });
+      // The write created the [opencode] block
+      expect(parsed['[opencode]'].agents.explore.model).toBe('fresh/model');
+      // Nothing was written at the shared-base level
+      expect(parsed.agents).toBeUndefined();
+    });
+
+    it('writes to the [opencode] block when the file only has shared-base agents', async () => {
+      writeConfig(`{
+  "agents": {
+    "sisyphus": { "model": "base/model" }
+  }
+}
+`);
+      store = new ConfigStore(tmpDir);
+
+      await store.updateConfig((draft) => {
+        draft.agents!.sisyphus!.model = 'changed/model';
+      });
+
+      const parsed = JSON.parse(readConfig());
+      // Shared base is preserved verbatim, not flattened or duplicated
+      expect(parsed.agents.sisyphus.model).toBe('base/model');
+      // The override lands in the [opencode] block and wins on read
+      expect(parsed['[opencode]'].agents.sisyphus.model).toBe('changed/model');
+      expect(store.getAgent('sisyphus')?.model).toBe('changed/model');
+    });
+
+    it('does not flatten untouched base-level values into the [opencode] block', async () => {
+      writeConfig(`{
+  "agents": {
+    "sisyphus": { "model": "base/model" },
+    "explore": { "model": "untouched/model" }
+  }
+}
+`);
+      store = new ConfigStore(tmpDir);
+
+      await store.updateConfig((draft) => {
+        draft.agents!.sisyphus!.model = 'changed/model';
+      });
+
+      const parsed = JSON.parse(readConfig());
+      // Only the changed leaf was written
+      expect(parsed['[opencode]'].agents.sisyphus).toEqual({
+        model: 'changed/model',
+      });
+      expect(parsed['[opencode]'].agents.explore).toBeUndefined();
+      // Effective view still merges both layers
+      expect(store.getAgent('explore')?.model).toBe('untouched/model');
     });
 
     it('removes a key when set to undefined', async () => {
       writeConfig(`{
-  "agents": {
-    "sisyphus": { "model": "old/model" },
-    "explore": { "model": "explore-model" }
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "old/model" },
+      "explore": { "model": "explore-model" }
+    }
   }
 }
 `);
@@ -163,6 +325,210 @@ describe('ConfigStore', () => {
       expect(raw).toContain('"explore"');
 
       expect(store.getAgent('sisyphus')).toBeUndefined();
+    });
+  });
+
+  describe('project layers', () => {
+    let workspace: string;
+
+    beforeEach(() => {
+      workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-workspace-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    });
+
+    it('exposes project-layer values via getConfig() but writes only to the user file', async () => {
+      // Project layer provides an agent the user file does not have
+      const projectOmoDir = path.join(workspace, '.omo');
+      fs.mkdirSync(projectOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectOmoDir, 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "explore": { "model": "project/model" } } } }`,
+        'utf-8',
+      );
+      writeConfig(`{ "[opencode]": { "agents": { "sisyphus": { "model": "user/model" } } } }`);
+
+      store = new ConfigStore(tmpDir, workspace);
+
+      // The project-layer value is visible in the effective view
+      expect(store.getAgent('explore')?.model).toBe('project/model');
+      expect(store.getAgent('sisyphus')?.model).toBe('user/model');
+
+      // Changing an unrelated value writes only to the user file
+      await store.updateConfig((draft) => {
+        draft.agents!.sisyphus!.model = 'user/changed';
+      });
+
+      const userParsed = JSON.parse(readConfig());
+      expect(userParsed['[opencode]'].agents.sisyphus.model).toBe('user/changed');
+      // The project-inherited agent was NOT flattened into the user file
+      expect(userParsed['[opencode]'].agents.explore).toBeUndefined();
+      // The project layer file is untouched
+      expect(
+        fs.readFileSync(path.join(projectOmoDir, 'omo.jsonc'), 'utf-8'),
+      ).toContain('project/model');
+    });
+
+    it('overriding a project-layer value writes it to the user file (user wins)', async () => {
+      const projectOmoDir = path.join(workspace, '.omo');
+      fs.mkdirSync(projectOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectOmoDir, 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "explore": { "model": "project/model" } } } }`,
+        'utf-8',
+      );
+      writeConfig('{}');
+
+      store = new ConfigStore(tmpDir, workspace);
+
+      await store.updateConfig((draft) => {
+        draft.agents!.explore!.model = 'user/override';
+      });
+
+      const userParsed = JSON.parse(readConfig());
+      expect(userParsed['[opencode]'].agents.explore.model).toBe('user/override');
+      // The project layer file is untouched
+      expect(
+        fs.readFileSync(path.join(projectOmoDir, 'omo.jsonc'), 'utf-8'),
+      ).toContain('project/model');
+      // Effective view now resolves to the user override
+      expect(store.getAgent('explore')?.model).toBe('user/override');
+    });
+
+    it('nearest project layer beats a farther one', () => {
+      const nested = path.join(workspace, 'packages', 'app');
+      fs.mkdirSync(path.join(workspace, '.omo'), { recursive: true });
+      fs.mkdirSync(path.join(nested, '.omo'), { recursive: true });
+      fs.writeFileSync(
+        path.join(workspace, '.omo', 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "explore": { "model": "far/model" } } } }`,
+        'utf-8',
+      );
+      fs.writeFileSync(
+        path.join(nested, '.omo', 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "explore": { "model": "near/model" } } } }`,
+        'utf-8',
+      );
+      writeConfig('{}');
+
+      store = new ConfigStore(tmpDir, nested);
+      expect(store.getAgent('explore')?.model).toBe('near/model');
+    });
+
+    it('project-layer base-level agents merge with the user layer', () => {
+      const projectOmoDir = path.join(workspace, '.omo');
+      fs.mkdirSync(projectOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectOmoDir, 'omo.jsonc'),
+        `{ "agents": { "oracle": { "model": "project-base/model" } } }`,
+        'utf-8',
+      );
+      writeConfig(`{ "[opencode]": { "agents": { "sisyphus": { "model": "user/model" } } } }`);
+
+      store = new ConfigStore(tmpDir, workspace);
+      expect(store.getAgent('oracle')?.model).toBe('project-base/model');
+      expect(store.getAgent('sisyphus')?.model).toBe('user/model');
+    });
+
+    it('nearest project layer beats the user layer for the same key (upstream precedence)', () => {
+      const projectOmoDir = path.join(workspace, '.omo');
+      fs.mkdirSync(projectOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectOmoDir, 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "explore": { "model": "project/model" } } } }`,
+        'utf-8',
+      );
+      writeConfig(`{ "[opencode]": { "agents": { "explore": { "model": "user/model" } } } }`);
+
+      // Upstream resolution order: user layer first, project layers after —
+      // the nearest project file has the highest precedence and beats the
+      // user layer. Writes still always go to the user file.
+      store = new ConfigStore(tmpDir, workspace);
+      expect(store.getAgent('explore')?.model).toBe('project/model');
+    });
+
+    it('a user-layer [opencode] override written over a project value wins on the next read', async () => {
+      const projectOmoDir = path.join(workspace, '.omo');
+      fs.mkdirSync(projectOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectOmoDir, 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "sisyphus": { "model": "project/model" } } } }`,
+        'utf-8',
+      );
+      writeConfig(
+        `{ "[opencode]": { "agents": { "sisyphus": { "model": "user/model" } } } }`,
+      );
+
+      // Project layer wins while it overrides the same harness-block entry.
+      store = new ConfigStore(tmpDir, workspace);
+      expect(store.getAgent('sisyphus')?.model).toBe('project/model');
+
+      // After the user edits the value, the user file's [opencode] entry is
+      // rewritten... but the project layer still declares the same key, so
+      // the project layer still wins on a fresh read. This documents the
+      // upstream precedence rule rather than a bug: editing a project-
+      // overridden value in the user file cannot beat the project file.
+      await store.updateConfig((draft) => {
+        draft.agents!.sisyphus!.model = 'edited/model';
+      });
+      expect(JSON.parse(readConfig())['[opencode]'].agents.sisyphus.model).toBe(
+        'edited/model',
+      );
+
+      const fresh = new ConfigStore(tmpDir, workspace);
+      expect(fresh.getAgent('sisyphus')?.model).toBe('project/model');
+      fresh.dispose();
+    });
+
+    it('a user-layer [opencode] entry beats a project SHARED-BASE entry for the same agent', () => {
+      const projectOmoDir = path.join(workspace, '.omo');
+      fs.mkdirSync(projectOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectOmoDir, 'omo.jsonc'),
+        `{ "agents": { "sisyphus": { "model": "project-base/model" } } }`,
+        'utf-8',
+      );
+      writeConfig(
+        `{ "[opencode]": { "agents": { "sisyphus": { "model": "user/model" } } } }`,
+      );
+
+      // Resolution order within the folded document is base first, then the
+      // harness block — a project layer's shared-base value must not clobber
+      // the user layer's [opencode] harness value for the same agent.
+      store = new ConfigStore(tmpDir, workspace);
+      expect(store.getAgent('sisyphus')?.model).toBe('user/model');
+    });
+
+    it('does not walk project layers when workspaceDir is not given', () => {
+      const projectOmoDir = path.join(workspace, '.omo');
+      fs.mkdirSync(projectOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectOmoDir, 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "explore": { "model": "project/model" } } } }`,
+        'utf-8',
+      );
+      writeConfig('{}');
+
+      // Single-arg form: baseDir given, workspaceDir omitted → walking OFF
+      store = new ConfigStore(tmpDir);
+      expect(store.getAgent('explore')).toBeUndefined();
+    });
+
+    it('skips symlinked project .omo directories', () => {
+      const realOmoDir = path.join(tmpDir, 'real-omo');
+      fs.mkdirSync(realOmoDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(realOmoDir, 'omo.jsonc'),
+        `{ "[opencode]": { "agents": { "explore": { "model": "symlink/model" } } } }`,
+        'utf-8',
+      );
+      fs.symlinkSync(realOmoDir, path.join(workspace, '.omo'));
+      writeConfig('{}');
+
+      store = new ConfigStore(tmpDir, workspace);
+      expect(store.getAgent('explore')).toBeUndefined();
     });
   });
 
@@ -185,8 +551,10 @@ describe('ConfigStore', () => {
         configPath,
         `{
   // updated comment
-  "agents": {
-    "sisyphus": { "model": "changed/externally" },
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "changed/externally" },
+    },
   },
 }
 `,

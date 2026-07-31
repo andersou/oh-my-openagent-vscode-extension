@@ -731,6 +731,39 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(after).toHaveLength(0);
   });
 
+  it('edits the Reasoning setting through the defaults select and saves it', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'main/model' },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const select = window.document.getElementById('f-new-reasoning') as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'auto']);
+
+    select.value = 'high';
+    select.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    const saveBtn = window.document.getElementById('btn-save') as HTMLButtonElement;
+    saveBtn.click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveMessage = messages.find(
+      (message): message is { command: 'save'; payload: { reasoning?: unknown } } =>
+        typeof message === 'object' &&
+        message !== null &&
+        'command' in message &&
+        message.command === 'save',
+    );
+    expect(saveMessage?.payload.reasoning).toBe('high');
+  });
+
   it('populates reasoning options from verbose metadata variants', async () => {
     const { window } = env;
     window.postMessage({
@@ -906,7 +939,7 @@ describe('webview lazy model picker (end-to-end)', () => {
 
     expect(window.document.querySelector('[data-section="defaults"]')).not.toBeNull();
 
-    for (const name of ['variant-mode', 'reasoningEffort-mode', 'temperature-mode', 'top_p-mode', 'maxTokens-mode', 'thinking-mode']) {
+    for (const name of ['variant-mode', 'reasoning-mode', 'reasoningEffort-mode', 'temperature-mode', 'top_p-mode', 'maxTokens-mode', 'thinking-mode']) {
       const mode = window.document.querySelector<HTMLSelectElement>(`[data-model-position="main"] select[name="${name}"]`);
       expect(mode).not.toBeNull();
       if (!mode) throw new Error(`${name} control did not render`);

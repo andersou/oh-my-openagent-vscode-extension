@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.1] - 2026-07-31
+
+This release migrates the extension to the omo.dev unified config spec: the active config is now `~/.omo/omo.jsonc` (user layer) with optional per-project `.omo/omo.jsonc` layers, and the extension edits the `[opencode]` harness block. It also adds the new `reasoning` field to the agent/category form editor.
+
+### BREAKING CHANGES
+
+- **Config file location** — the extension now reads and writes `~/.omo/omo.jsonc` (fallback `omo.json`) on every platform instead of `~/.config/opencode/oh-my-openagent.json[c]` / `%APPDATA%\opencode\oh-my-openagent.json[c]`. Legacy `oh-my-openagent.json[c]` and `oh-my-opencode.json[c]` files are no longer discovered. Run `bunx oh-my-openagent config migrate` once to import them into the unified file.
+- **Writes target the `[opencode]` block** — all mutations go into the `[opencode]` harness block of the user file. Shared-base keys and sibling harness blocks (`[senpi]`, `[codex]`) are preserved untouched, and JSONC comments/formatting survive every edit as before.
+- **Sidecar rename** — profiles moved from `oh-my-openagent.profiles.json` to `~/.omo/omo.profiles.json`. A legacy sidecar (next to the config, or in `~/.config/opencode`) is renamed automatically on first access.
+
+### Features
+
+- **Project layers (read-only)** — `.omo/omo.jsonc` / `.omo/omo.json` files are discovered walking from the workspace directory up to the home directory and merged into the effective view (nearest layer wins, beating the user layer). The fold follows the upstream resolution order: shared base first, then the `[opencode]` harness block, so a project's shared-base value cannot clobber a user-layer harness value for the same agent. Writes always go to the user layer; project-inherited values are never flattened into the user file unless actually changed.
+- **`reasoning` field** — agents, categories, fallback-model entries, and `ultrawork`/`compaction` variants now support the new `reasoning` key (`off | minimal | low | medium | high | xhigh | max | auto`), editable in the form editor alongside the existing `reasoningEffort` (relabeled `Reasoning effort (legacy)`). Profile import/export round-trips the field.
+- **New-shape profile import** — `Create Profile from Config File…` now accepts a unified `omo.jsonc`: it merges shared-base `agents`/`categories` with the `[opencode]` block (harness wins) instead of only reading flat root-level keys.
+
+### Migration
+
+1. Run `bunx oh-my-openagent config migrate` to import legacy `oh-my-openagent.json[c]` files into `~/.omo/omo.jsonc` (upstream moves the legacy files to a backup directory).
+2. Open the extension — profiles migrate automatically on first access.
+
+### Tests
+
+- 527 tests pass, including new coverage for `[opencode]` block creation, sibling-key preservation, base-vs-harness merge precedence, project-layer reads with user-only writes, nearest-layer precedence, symlinked `.omo` skipping, legacy-file rejection, legacy sidecar migration, new-shape fragment import, and `reasoning` validation/round-trip.
+
 ## [0.6.0-beta.1] - 2026-07-23
 
 This pre-release adds descriptive hover tooltips to the sidebar: agents and categories now explain what they are for, on top of the configuration details the tooltip already showed.

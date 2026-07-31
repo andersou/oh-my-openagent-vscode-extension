@@ -20,7 +20,8 @@ export function validateModelCapabilities(routing, metadataByModel) {
     const capabilities = metadata.capabilities ?? {};
     const temperature = effectiveValue(card, routing.defaults, 'temperature');
     const topP = effectiveValue(card, routing.defaults, 'top_p');
-    const reasoning = effectiveValue(card, routing.defaults, 'reasoningEffort');
+    const reasoning = effectiveValue(card, routing.defaults, 'reasoning');
+    const reasoningEffort = effectiveValue(card, routing.defaults, 'reasoningEffort');
     const thinking = effectiveValue(card, routing.defaults, 'thinking');
     const variant = effectiveValue(card, routing.defaults, 'variant');
     if (capabilities.temperature === false) {
@@ -28,7 +29,8 @@ export function validateModelCapabilities(routing, metadataByModel) {
       if (hasValue(topP)) addError(errors, card.uid, 'top_p', 'This model does not support top-p.');
     }
     if (capabilities.reasoning === false) {
-      if (hasValue(reasoning)) addError(errors, card.uid, 'reasoningEffort', 'This model does not support reasoning controls.');
+      if (hasValue(reasoning)) addError(errors, card.uid, 'reasoning', 'This model does not support reasoning controls.');
+      if (hasValue(reasoningEffort)) addError(errors, card.uid, 'reasoningEffort', 'This model does not support reasoning controls.');
       if (hasValue(thinking)) addError(errors, card.uid, 'thinking', 'This model does not support thinking controls.');
     }
     const variants = metadata.variants;

@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { ConfigStore } from './configStore.js';
-import { ProfileStore } from './profileStore.js';
+import { legacySidecarCandidates, ProfileStore } from './profileStore.js';
 import type { ProfileFragment, NormalizedProfilesFile } from './profileValidation.js';
 import type { ImportProfilesResult, Profile } from './schema.js';
 
@@ -34,6 +34,42 @@ const CONFIG_WITH_COMMENTS = `{
 const CONFIG_MINIMAL = `{
   "agents": {
     "sisyphus": { "model": "minimal/model" },
+  },
+}
+`;
+
+/**
+ * Same editable surface as the flat fixtures, nested under the `[opencode]`
+ * block (new omo.jsonc write shape). Writes always target `[opencode]`, so
+ * tests that rewrite the config must seed it there.
+ */
+const CONFIG_WITH_COMMENTS_OPENCODE = `{
+  // Top-level comment
+  "[opencode]": {
+    "agents": {
+      "sisyphus": {
+        "model": "sisyphus/model", // inline comment
+      },
+      "explore": { "model": "explore/model" },
+    },
+    "categories": {
+      "deep": {
+        "model": "deep/model", // category comment
+      },
+    },
+    "agent_order": [
+      "sisyphus",
+      "explore",
+    ],
+  },
+}
+`;
+
+const CONFIG_MINIMAL_OPENCODE = `{
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "minimal/model" },
+    },
   },
 }
 `;
@@ -70,8 +106,8 @@ describe('ProfileStore', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-profile-test-'));
-    configPath = path.join(tmpDir, 'oh-my-openagent.json');
-    sidecarPath = path.join(tmpDir, 'oh-my-openagent.profiles.json');
+    configPath = path.join(tmpDir, 'omo.jsonc');
+    sidecarPath = path.join(tmpDir, 'omo.profiles.json');
   });
 
   afterEach(() => {
@@ -665,7 +701,7 @@ describe('ProfileStore', () => {
     });
 
     it('preserves JSONC formatting (comments and trailing commas) in the active config', async () => {
-      setupWithConfig(CONFIG_WITH_COMMENTS);
+      setupWithConfig(CONFIG_WITH_COMMENTS_OPENCODE);
 
       // Snapshot the current config
       await profileStore.createProfile('snap');
@@ -704,7 +740,7 @@ describe('ProfileStore', () => {
     });
 
     it('replaces existing agents and categories entirely with the profile values', async () => {
-      setupWithConfig(CONFIG_WITH_COMMENTS);
+      setupWithConfig(CONFIG_WITH_COMMENTS_OPENCODE);
 
       // Create profile with only one agent (different from original which has 2)
       await configStore.updateConfig((draft) => {
@@ -715,7 +751,7 @@ describe('ProfileStore', () => {
       await profileStore.createProfile('single-agent');
 
       // Restore the full config (with explore agent)
-      fs.writeFileSync(configPath, CONFIG_WITH_COMMENTS, 'utf-8');
+      fs.writeFileSync(configPath, CONFIG_WITH_COMMENTS_OPENCODE, 'utf-8');
       // Force re-read
       configStore = new ConfigStore(tmpDir);
       profileStore = new ProfileStore(configStore);
@@ -1095,6 +1131,139 @@ describe('ProfileStore', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Legacy sidecar migration
+  // -----------------------------------------------------------------------
+
+  describe('legacy sidecar migration', () => {
+    const LEGACY_SIDECAR = 'oh-my-openagent.profiles.json';
+
+    function writeLegacySidecar(
+      legacyPath: string,
+      profileName: string,
+    ): void {
+      fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+      fs.writeFileSync(
+        legacyPath,
+        JSON.stringify(
+          {
+            version: 1,
+            profiles: [
+              {
+                name: profileName,
+                agents: { sisyphus: { model: 'legacy/model' } },
+                createdAt: '2020-01-01T00:00:00.000Z',
+                updatedAt: '2020-01-01T00:00:00.000Z',
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+    }
+
+    it('renames a legacy sidecar next to the config and loads it', () => {
+      // Given: a legacy sidecar beside the config, no new sidecar yet
+      const legacyPath = path.join(tmpDir, LEGACY_SIDECAR);
+      writeLegacySidecar(legacyPath, 'migrated');
+      createStores();
+
+      // When: profiles are listed (triggers the one-time migration)
+      const profiles = profileStore.listProfiles();
+
+      // Then: the legacy file was moved, not copied, and its content is live
+      expect(profiles.map((p) => p.name)).toEqual(['migrated']);
+      expect(fs.existsSync(legacyPath)).toBe(false);
+      expect(fs.existsSync(sidecarPath)).toBe(true);
+      expect(readSidecar(sidecarPath).profiles[0].name).toBe('migrated');
+    });
+
+    it('finds a legacy sidecar in ~/.config/opencode when the config dir has none', () => {
+      // Given: HOME pointed at a fake home whose .config/opencode holds a legacy sidecar
+      const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-fake-home-'));
+      const originalHome = process.env.HOME;
+      const legacyPath = path.join(
+        fakeHome,
+        '.config',
+        'opencode',
+        LEGACY_SIDECAR,
+      );
+      writeLegacySidecar(legacyPath, 'from-legacy-home');
+      process.env.HOME = fakeHome;
+
+      try {
+        createStores();
+
+        // When: profiles are listed (migration should move the legacy file)
+        const profiles = profileStore.listProfiles();
+
+        // Then
+        expect(profiles.map((p) => p.name)).toEqual(['from-legacy-home']);
+        expect(fs.existsSync(legacyPath)).toBe(false);
+        expect(fs.existsSync(sidecarPath)).toBe(true);
+      } finally {
+        if (originalHome === undefined) {
+          delete process.env.HOME;
+        } else {
+          process.env.HOME = originalHome;
+        }
+        fs.rmSync(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    it('prefers the legacy sidecar next to the config over the one in ~/.config/opencode', () => {
+      // Given: legacy sidecars in both candidate locations
+      const nextToConfig = path.join(tmpDir, LEGACY_SIDECAR);
+      writeLegacySidecar(nextToConfig, 'next-to-config');
+
+      const candidates = legacySidecarCandidates(tmpDir);
+
+      // Then: the config-dir candidate comes first
+      expect(candidates[0]).toBe(nextToConfig);
+      expect(candidates[1]).toBe(
+        path.join(os.homedir(), '.config', 'opencode', LEGACY_SIDECAR),
+      );
+    });
+
+    it('does not migrate when the new sidecar already exists', () => {
+      // Given: an existing new sidecar plus a leftover legacy file
+      createStores();
+      fs.writeFileSync(
+        sidecarPath,
+        JSON.stringify({ version: 1, profiles: [] }),
+        'utf-8',
+      );
+      const legacyPath = path.join(tmpDir, LEGACY_SIDECAR);
+      writeLegacySidecar(legacyPath, 'leftover');
+
+      // When: profiles are listed
+      const profiles = profileStore.listProfiles();
+
+      // Then: the legacy file is untouched and the new sidecar wins
+      expect(profiles).toEqual([]);
+      expect(fs.existsSync(legacyPath)).toBe(true);
+    });
+
+    it('migrates on write as well as on read', async () => {
+      // Given: only a legacy sidecar exists
+      const legacyPath = path.join(tmpDir, LEGACY_SIDECAR);
+      writeLegacySidecar(legacyPath, 'pre-existing');
+      createStores();
+
+      // When: a write happens before any read
+      await profileStore.createProfile('fresh');
+
+      // Then: the legacy file was moved and both profiles are present
+      expect(fs.existsSync(legacyPath)).toBe(false);
+      expect(profileStore.listProfiles().map((p) => p.name)).toEqual([
+        'pre-existing',
+        'fresh',
+      ]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Transfer snapshots and replacement (Todo 7)
   // -----------------------------------------------------------------------
 
@@ -1287,7 +1456,7 @@ describe('ProfileStore', () => {
   describe('replaceActiveConfigFragment', () => {
     it('replaces agents and categories in the live config preserving comments and unrelated keys', async () => {
       // Given: a config with comments, agent_order, and a saved profile
-      setupWithConfig(CONFIG_WITH_COMMENTS);
+      setupWithConfig(CONFIG_WITH_COMMENTS_OPENCODE);
       await profileStore.createProfile('snap');
 
       // When: editing only the live config via the active config fragment helper
@@ -1312,7 +1481,7 @@ describe('ProfileStore', () => {
     });
 
     it('preserves comments on untouched keys when replacing categories', async () => {
-      setupWithConfig(CONFIG_WITH_COMMENTS);
+      setupWithConfig(CONFIG_WITH_COMMENTS_OPENCODE);
       await profileStore.createProfile('snap');
 
       await profileStore.replaceActiveConfigFragment({
@@ -1335,7 +1504,7 @@ describe('ProfileStore', () => {
     });
 
     it('deletes a live config section when the replacement omits it', async () => {
-      setupWithConfig(CONFIG_WITH_COMMENTS);
+      setupWithConfig(CONFIG_WITH_COMMENTS_OPENCODE);
 
       await profileStore.replaceActiveConfigFragment({
         agents: { sisyphus: { model: 'sisyphus/only' } },

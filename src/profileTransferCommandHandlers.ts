@@ -320,7 +320,7 @@ export async function handleExportAllProfiles(
     'utf8',
   );
   const result = await context.saveTransferFile(bytes, {
-    defaultUri: vscode.Uri.file('oh-my-openagent.profiles.json'),
+    defaultUri: vscode.Uri.file('omo.profiles.json'),
     filters: {
       'JSON files': ['json'],
       'JSONC files': ['jsonc'],

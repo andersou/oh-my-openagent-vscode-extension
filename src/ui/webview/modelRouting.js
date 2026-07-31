@@ -1,11 +1,11 @@
 // @ts-check
 
 /** @type {readonly SettingKey[]} */
-const SETTINGS = ['variant', 'reasoningEffort', 'temperature', 'top_p', 'maxTokens', 'thinking'];
+const SETTINGS = ['variant', 'reasoning', 'reasoningEffort', 'temperature', 'top_p', 'maxTokens', 'thinking'];
 const NUMERIC_SETTINGS = new Set(['temperature', 'top_p', 'maxTokens']);
 const FALLBACK_KNOWN_FIELDS = new Set(['model', ...SETTINGS]);
 
-/** @typedef {'variant' | 'reasoningEffort' | 'temperature' | 'top_p' | 'maxTokens' | 'thinking'} SettingKey */
+/** @typedef {'variant' | 'reasoning' | 'reasoningEffort' | 'temperature' | 'top_p' | 'maxTokens' | 'thinking'} SettingKey */
 /** @typedef {{ readonly mode: 'inherit' } | { readonly mode: 'override', readonly value: unknown }} OverrideState */
 /** @typedef {Readonly<Record<SettingKey, OverrideState>>} CardOverrides */
 /** @typedef {Partial<Record<SettingKey, unknown>>} RoutingDefaults */
@@ -35,6 +35,7 @@ function overrideFrom(entry, key, explicit) {
 function createOverrides(entry, explicit) {
   return {
     variant: overrideFrom(entry, 'variant', explicit),
+    reasoning: overrideFrom(entry, 'reasoning', explicit),
     reasoningEffort: overrideFrom(entry, 'reasoningEffort', explicit),
     temperature: overrideFrom(entry, 'temperature', explicit),
     top_p: overrideFrom(entry, 'top_p', explicit),

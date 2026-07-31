@@ -32,6 +32,7 @@ describe('profile runtime validation', () => {
           'openai/gpt-5.4-mini',
           {
             model: 'anthropic/claude-4',
+            reasoning: 'auto',
             reasoningEffort: 'medium',
             temperature: 0.4,
             top_p: 0.9,
@@ -43,6 +44,7 @@ describe('profile runtime validation', () => {
         temperature: 0.7,
         top_p: 0.95,
         maxTokens: 32768,
+        reasoning: 'high',
         reasoningEffort: 'xhigh',
         thinking: { type: 'enabled', budgetTokens: 4096 },
         prompt: 'Coordinate implementation.',
@@ -72,6 +74,7 @@ describe('profile runtime validation', () => {
     const categories = {
       deep: {
         model: 'openai/gpt-5.4',
+        reasoning: 'xhigh',
         main_overrides: { temperature: 0.2 },
         fallback_models: ['openai/gpt-5.4-mini'],
         textVerbosity: 'high',
@@ -280,6 +283,30 @@ describe('profile runtime validation', () => {
       input: { categories: { quick: { invented: true } } },
       code: 'unknown_field',
       path: ['categories', 'quick', 'invented'],
+    },
+    {
+      label: 'non-string agent reasoning',
+      input: { agents: { custom: { reasoning: 3 } } },
+      code: 'invalid_type',
+      path: ['agents', 'custom', 'reasoning'],
+    },
+    {
+      label: 'non-string category reasoning',
+      input: { categories: { quick: { reasoning: { level: 'high' } } } },
+      code: 'invalid_type',
+      path: ['categories', 'quick', 'reasoning'],
+    },
+    {
+      label: 'non-string nested fallback reasoning',
+      input: {
+        agents: {
+          custom: {
+            fallback_models: [{ model: 'valid/model', reasoning: true }],
+          },
+        },
+      },
+      code: 'invalid_type',
+      path: ['agents', 'custom', 'fallback_models', 0, 'reasoning'],
     },
     {
       label: 'invalid nested fallback enum',

@@ -112,7 +112,7 @@ describe('model routing state', () => {
     const restored = moveModelCard(reopened, reopened.cards[1].uid, 0);
 
     // Then: B's explicit temperature override survives in main_overrides; shared defaults stay unchanged.
-    expect(saved).toEqual({ model: 'b/model', variant: null, reasoningEffort: null,
+    expect(saved).toEqual({ model: 'b/model', variant: null, reasoning: null, reasoningEffort: null,
       temperature: 0.7, top_p: 0.8, maxTokens: null, thinking: null,
       main_overrides: { temperature: 0.2 },
       fallback_models: [{ model: 'a/model', temperature: 0.7, top_p: 0.8 }] });
@@ -255,7 +255,7 @@ describe('model routing state', () => {
   });
 
   it.each([
-    ['variant', 'fast'], ['reasoningEffort', 'high'], ['temperature', 0.7],
+    ['variant', 'fast'], ['reasoning', 'high'], ['reasoningEffort', 'high'], ['temperature', 0.7],
     ['top_p', 0.8], ['maxTokens', 2048], ['thinking', { type: 'disabled' }],
   ] as const)('emits null for cleared %s without null fallback fields', (key, value) => {
     // Given: one configured Main setting and an object fallback inheriting it.
@@ -266,7 +266,7 @@ describe('model routing state', () => {
     const payload = serializeModelRouting(setMainDefault(state, key, undefined));
 
     // Then: every absent Main setting deletes stale host values while fallback fields stay omitted.
-    expect(payload).toMatchObject({ variant: null, reasoningEffort: null, temperature: null,
+    expect(payload).toMatchObject({ variant: null, reasoning: null, reasoningEffort: null, temperature: null,
       top_p: null, maxTokens: null, thinking: null });
     expect(payload.fallback_models).toEqual([{ model: 'fallback/model' }]);
   });
@@ -353,7 +353,7 @@ describe('model routing state', () => {
     const payload = serializeModelRouting(state);
 
     // Then: an old persisted chain will be deleted explicitly.
-    expect(payload).toEqual({ model: 'main/model', variant: null, reasoningEffort: null,
+    expect(payload).toEqual({ model: 'main/model', variant: null, reasoning: null, reasoningEffort: null,
       temperature: 0.7, top_p: null, maxTokens: null, thinking: null,
       main_overrides: null,
       fallback_models: null });
@@ -424,7 +424,7 @@ describe('model routing state', () => {
     // Given: a saved payload with null deletion sentinels for unset defaults.
     const saved = {
       model: 'main/model', temperature: 0.7,
-      variant: null, reasoningEffort: null, top_p: null, maxTokens: null, thinking: null,
+      variant: null, reasoning: null, reasoningEffort: null, top_p: null, maxTokens: null, thinking: null,
       main_overrides: null,
       fallback_models: ['fallback/model'],
     };
@@ -454,6 +454,41 @@ describe('model routing state', () => {
 
     // Then: the invalid Main override is reported.
     expect(errors[edited.cards[0].uid].temperature).toBe('Must be between 0 and 2');
+  });
+
+  it('loads reasoning into defaults and fallback override modes', () => {
+    // Given: a shared reasoning default and a fallback overriding it.
+    const state = loadModelRouting({
+      model: 'main/model', reasoning: 'high',
+      fallback_models: [{ model: 'fallback/model', reasoning: 'auto' }],
+    });
+
+    // Then: reasoning is routed like any other setting through defaults and overrides.
+    expect(state.defaults.reasoning).toBe('high');
+    expect(state.cards[0].overrides.reasoning).toEqual({ mode: 'inherit' });
+    expect(state.cards[1].overrides.reasoning).toEqual({ mode: 'override', value: 'auto' });
+
+    // When: serialized, both values land in the payload.
+    const payload = serializeModelRouting(state);
+    expect(payload.reasoning).toBe('high');
+    expect(payload.fallback_models).toEqual([{ model: 'fallback/model', reasoning: 'auto' }]);
+  });
+
+  it('round-trips a Main reasoning override through main_overrides', () => {
+    // Given: Main has an explicit reasoning override distinct from the shared default.
+    const state = loadModelRouting({ model: 'main/model', reasoning: 'medium',
+      main_overrides: { reasoning: 'xhigh' },
+      fallback_models: ['fallback/model'] });
+
+    // When: serialized and reloaded.
+    const saved = serializeModelRouting(state);
+    const persisted = Object.fromEntries(Object.entries(saved).filter(([, value]) => value !== null));
+    const reopened = loadModelRouting(persisted);
+
+    // Then: the Main override survives and the shared default is unchanged.
+    expect(saved.main_overrides).toEqual({ reasoning: 'xhigh' });
+    expect(reopened.cards[0].overrides.reasoning).toEqual({ mode: 'override', value: 'xhigh' });
+    expect(reopened.defaults.reasoning).toBe('medium');
   });
 
   it('serializes main_overrides as null when Main has no explicit overrides', () => {

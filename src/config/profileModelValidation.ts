@@ -17,7 +17,7 @@ interface ModelValidationPolicy {
 }
 
 const MODEL_KEYS: readonly string[] = [
-  'model', 'variant', 'reasoningEffort', 'temperature', 'top_p', 'maxTokens',
+  'model', 'variant', 'reasoning', 'reasoningEffort', 'temperature', 'top_p', 'maxTokens',
   'thinking',
 ];
 const MAIN_OVERRIDE_KEYS = MODEL_KEYS.filter((key) => key !== 'model');
@@ -111,6 +111,11 @@ function modelSettings(
         [...path, 'reasoningEffort'],
       );
     }
+  }
+  // Upstream schema accepts any string for `reasoning` (anyOf [enum, string]),
+  // so only the type is validated in both transfer and editor modes.
+  if (Object.hasOwn(object, 'reasoning')) {
+    stringValue(object.reasoning, [...path, 'reasoning']);
   }
   if (Object.hasOwn(object, 'temperature')) {
     finiteRange(object.temperature, [...path, 'temperature'], [0, 2]);
