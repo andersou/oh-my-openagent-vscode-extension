@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-beta.2] - 2026-08-01
+
+This pre-release fixes a save-time regression from `1.0.0-beta.1`: saving an agent or category failed with `Unknown field: reasoning`, most visibly after adding a fallback.
+
+### Bug Fixes
+
+- **Save payload allow-lists** — `AGENT_FIELDS` and `CATEGORY_FIELDS` now include `reasoning`. The form editor's `reasoning` field (introduced in `1.0.0-beta.1`) is serialized on every save — as a value or an explicit `null` — but the save-time allow-lists rejected it as an unknown field, so every save from the form editor failed. The field now round-trips: explicit values persist, `null` clears a previously-set value, and fallback-level `reasoning` overrides save correctly.
+
+### Tests
+
+- Add agent/category regression coverage for top-level `reasoning: null` and nested fallback `reasoning` payloads. 529 tests pass (19 files).
+
 ## [1.0.0-beta.1] - 2026-07-31
 
 This release migrates the extension to the omo.dev unified config spec: the active config is now `~/.omo/omo.jsonc` (user layer) with optional per-project `.omo/omo.jsonc` layers, and the extension edits the `[opencode]` harness block. It also adds the new `reasoning` field to the agent/category form editor.
