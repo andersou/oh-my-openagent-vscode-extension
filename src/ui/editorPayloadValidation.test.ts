@@ -21,6 +21,7 @@ describe('structured editor allow-lists', () => {
       'prompt',
       'prompt_append',
       'providerOptions',
+      'reasoning',
       'reasoningEffort',
       'temperature',
       'textVerbosity',
@@ -49,6 +50,7 @@ describe('structured editor allow-lists', () => {
       'max_prompt_tokens',
       'model',
       'prompt_append',
+      'reasoning',
       'reasoningEffort',
       'temperature',
       'textVerbosity',
@@ -94,5 +96,22 @@ describe('structured editor allow-lists', () => {
         AGENT_FIELDS,
       ),
     ).toThrow('Invalid thinking.budgetTokens: must be a positive integer');
+  });
+
+  it.each([
+    ['agent', AGENT_FIELDS],
+    ['category', CATEGORY_FIELDS],
+  ] as const)('accepts %s model-routing reasoning fields', (_kind, allowedFields) => {
+    const payload = {
+      model: 'provider/model',
+      reasoning: null,
+      fallback_models: [{ model: 'fallback/model', reasoning: 'high' }],
+    };
+
+    expect(() => validateAndClean<Record<string, unknown>>(payload, allowedFields)).not.toThrow();
+    expect(validateAndClean<Record<string, unknown>>(payload, allowedFields)).toEqual({
+      model: 'provider/model',
+      fallback_models: [{ model: 'fallback/model', reasoning: 'high' }],
+    });
   });
 });
