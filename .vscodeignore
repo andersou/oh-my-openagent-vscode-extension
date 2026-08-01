@@ -16,6 +16,7 @@ package-lock.json
 *.log
 .DS_Store
 coverage/**
+prompts/**
 **/.vitest-cache/**
 **/__snapshots__/**
 src/**
