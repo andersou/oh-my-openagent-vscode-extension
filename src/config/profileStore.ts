@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { ConfigStore } from './configStore.js';
 import type {
@@ -72,14 +73,71 @@ export interface ActiveProfileModification {
 }
 
 // ---------------------------------------------------------------------------
+// Sidecar naming and legacy migration
+// ---------------------------------------------------------------------------
+
+const SIDECAR_FILENAME = 'omo.profiles.json';
+const LEGACY_SIDECAR_FILENAME = 'oh-my-openagent.profiles.json';
+
+/**
+ * Legacy sidecar locations to migrate from, in priority order:
+ * first the file sitting next to the (possibly legacy) user config, then the
+ * pre-omo.dev `~/.config/opencode` directory. Exported for unit tests.
+ */
+export function legacySidecarCandidates(configDir: string): string[] {
+  const candidates = [path.join(configDir, LEGACY_SIDECAR_FILENAME)];
+  try {
+    candidates.push(
+      path.join(os.homedir(), '.config', 'opencode', LEGACY_SIDECAR_FILENAME),
+    );
+  } catch {
+    // os.homedir() can throw in exotic environments; skip that candidate.
+  }
+  return candidates;
+}
+
+/**
+ * One-time migration: when the new sidecar does not exist, move the first
+ * existing legacy sidecar to its new location. Move, not copy. Never throws —
+ * a failed rename falls back to copy+unlink, and if both fail we warn and
+ * continue with empty profiles.
+ */
+function migrateLegacySidecar(sidecarPath: string, configDir: string): void {
+  if (fs.existsSync(sidecarPath)) {
+    return;
+  }
+  const legacyPath = legacySidecarCandidates(configDir).find((candidate) =>
+    fs.existsSync(candidate),
+  );
+  if (legacyPath === undefined) {
+    return;
+  }
+  try {
+    fs.renameSync(legacyPath, sidecarPath);
+  } catch {
+    try {
+      fs.copyFileSync(legacyPath, sidecarPath);
+      fs.unlinkSync(legacyPath);
+    } catch (err: unknown) {
+      console.warn(
+        `[OhMyOpenAgent] Failed to migrate legacy profiles sidecar ${legacyPath}:`,
+        err,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // ProfileStore
 // ---------------------------------------------------------------------------
 
 /**
- * Manages a sidecar JSON file (`oh-my-openagent.profiles.json`) next to the
- * active OmO config. Profiles are named snapshots of `agents` / `categories`
- * that can be activated via `ConfigStore.updateConfig`, preserving JSONC
- * formatting in the active config.
+ * Manages a sidecar JSON file (`omo.profiles.json`) next to the active omo.dev
+ * config (`~/.omo/omo.jsonc`). Profiles are named snapshots of `agents` /
+ * `categories` that can be activated via `ConfigStore.updateConfig`,
+ * preserving JSONC formatting in the active config. On first access, a legacy
+ * `oh-my-openagent.profiles.json` (beside the config or under the pre-omo.dev
+ * `~/.config/opencode` directory) is moved to the new sidecar path.
  */
 export class ProfileStore {
   private readonly configStore: ConfigStore;
@@ -97,12 +155,12 @@ export class ProfileStore {
   // ---- Path resolution ----
 
   /**
-   * Return the sidecar path: `<active-config-dir>/oh-my-openagent.profiles.json`.
+   * Return the sidecar path: `<active-config-dir>/omo.profiles.json`.
    */
   private getSidecarPath(): string {
     const configPath = this.configStore.getConfigPath();
     const dir = path.dirname(configPath);
-    return path.join(dir, 'oh-my-openagent.profiles.json');
+    return path.join(dir, SIDECAR_FILENAME);
   }
 
   // ---- Sidecar I/O ----
@@ -113,6 +171,7 @@ export class ProfileStore {
    */
   private readProfilesFile(): ProfilesFile {
     const sidecarPath = this.getSidecarPath();
+    migrateLegacySidecar(sidecarPath, path.dirname(sidecarPath));
     try {
       const raw = fs.readFileSync(sidecarPath, 'utf-8');
       const data = JSON.parse(raw) as ProfilesFile;
@@ -139,6 +198,8 @@ export class ProfileStore {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
+
+    migrateLegacySidecar(sidecarPath, dir);
 
     const content = JSON.stringify(data, null, 2) + '\n';
     const tmpPath = `${sidecarPath}.${process.pid}.tmp`;

@@ -90,13 +90,14 @@ describe('profile transfer serialization', () => {
       agents: {
         sisyphus: {
           model: 'openai/gpt-5.6',
-          fallback_models: [{ model: 'openai/gpt-5.5', temperature: 0.4 }],
+          reasoning: 'high',
+          fallback_models: [{ model: 'openai/gpt-5.5', reasoning: 'auto', temperature: 0.4 }],
           permission: { bash: { 'git status': 'allow' }, custom: 'ask' },
           providerOptions: { vendor: { opaque: ['do not inspect', 7] } },
           skills: ['git-master'],
         },
       },
-      categories: { deep: { maxTokens: 1234.5, thinking: { type: 'enabled' } } },
+      categories: { deep: { maxTokens: 1234.5, reasoning: 'xhigh', thinking: { type: 'enabled' } } },
     };
 
     const parsed = parseProfileTransfer(encode(serializeProfileTransfer(fragment)));

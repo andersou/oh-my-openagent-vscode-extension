@@ -1,6 +1,14 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { AgentConfig, Profile, ProfilesFile } from './schema.js';
+import type {
+  AgentConfig,
+  CategoryConfig,
+  FallbackModelConfig,
+  ModelVariantConfig,
+  Profile,
+  ProfilesFile,
+  Reasoning,
+} from './schema.js';
 
 type IsAssignable<Source, Target> = Source extends Target ? true : false;
 
@@ -16,8 +24,8 @@ type ExpectedProfilesFileRootKey =
   | 'lastActiveProfile'
   | 'version';
 
-// Pinned upstream contract: 9c81de52a18f5787154debe0e3cdf0ab465da2ff
-// https://github.com/code-yeongyu/oh-my-openagent/blob/9c81de52a18f5787154debe0e3cdf0ab465da2ff/assets/oh-my-opencode.schema.json
+// Pinned upstream contract (omo.dev unified config spec, dev branch):
+// https://github.com/code-yeongyu/oh-my-openagent/blob/dev/assets/omo.schema.json
 const UPSTREAM_PROFILE_AGENT = {
   model: 'openai/gpt-5.4',
   skills: ['programming', 'git-master'],
@@ -50,6 +58,15 @@ const PROFILE_SECTIONS = {
     },
   },
 } satisfies Pick<Profile, 'agents' | 'categories'>;
+
+// New in the omo.schema.json contract: `reasoning` alongside the unchanged
+// `reasoningEffort`, on agents, categories, fallback models and variants.
+const REASONING_SURFACE = {
+  agent: { reasoning: 'auto' } satisfies AgentConfig,
+  category: { reasoning: 'xhigh' } satisfies CategoryConfig,
+  fallback: { model: 'openai/gpt-5.4', reasoning: 'off' } satisfies FallbackModelConfig,
+  variant: { model: 'openai/gpt-5.4', reasoning: 'max' } satisfies ModelVariantConfig,
+} as const;
 
 describe('profile schema contract', () => {
   it('pins exact Profile root keys at compile time', () => {
@@ -93,5 +110,41 @@ describe('profile schema contract', () => {
     expect(roundTrip.categories.deep.main_overrides).toEqual({
       reasoningEffort: 'high',
     });
+  });
+
+  it('pins the new `reasoning` enum on the editable surfaces', () => {
+    expectTypeOf<Reasoning>().toEqualTypeOf<
+      'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto'
+    >();
+    expectTypeOf<AgentConfig['reasoning']>().toEqualTypeOf<
+      Reasoning | undefined
+    >();
+    expectTypeOf<CategoryConfig['reasoning']>().toEqualTypeOf<
+      Reasoning | undefined
+    >();
+    expectTypeOf<FallbackModelConfig['reasoning']>().toEqualTypeOf<
+      Reasoning | undefined
+    >();
+    expectTypeOf<ModelVariantConfig['reasoning']>().toEqualTypeOf<
+      Reasoning | undefined
+    >();
+
+    // reasoningEffort is unchanged and remains available on agents/categories
+    expectTypeOf<AgentConfig['reasoningEffort']>().toEqualTypeOf<
+      | 'none'
+      | 'minimal'
+      | 'low'
+      | 'medium'
+      | 'high'
+      | 'xhigh'
+      | 'max'
+      | undefined
+    >();
+
+    // Compile-time assignment round-trip (satisfies above already pins this)
+    expect(REASONING_SURFACE.agent.reasoning).toBe('auto');
+    expect(REASONING_SURFACE.category.reasoning).toBe('xhigh');
+    expect(REASONING_SURFACE.fallback.reasoning).toBe('off');
+    expect(REASONING_SURFACE.variant.reasoning).toBe('max');
   });
 });

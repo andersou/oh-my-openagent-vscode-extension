@@ -27,8 +27,10 @@ import type { Profile } from './config/schema.js';
 
 const INITIAL_CONFIG = `{
   // initial comment
-  "agents": {
-    "sisyphus": { "model": "old/model" },
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "old/model" },
+    },
   },
 }
 `;
@@ -102,7 +104,7 @@ function makeProfileItem(name: string): AgentModelTreeItem {
 }
 
 function readSidecar(tmpDir: string): { profiles: Profile[]; lastActiveProfile?: string; version: number } {
-  const sidecarPath = path.join(tmpDir, 'oh-my-openagent.profiles.json');
+  const sidecarPath = path.join(tmpDir, 'omo.profiles.json');
   if (!fs.existsSync(sidecarPath)) {
     return { profiles: [], version: 1 };
   }
@@ -247,7 +249,7 @@ describe('smoke: end-to-end editor flow', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-smoke-'));
-    configPath = path.join(tmpDir, 'oh-my-openagent.json');
+    configPath = path.join(tmpDir, 'omo.jsonc');
     fs.writeFileSync(configPath, INITIAL_CONFIG, 'utf-8');
 
     extensionPath = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-smoke-ext-'));

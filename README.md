@@ -19,7 +19,7 @@ The sidebar view shows your active config, all built-in agents and categories wi
 - **Ordered model cards**: position 1 is **Main** and every later card is a fallback. Drag any fallback into position 1 to replace Main. The `Drag` handle explains this on hover and supports keyboard reordering: press Space or Enter to pick up, use Arrow Up or Arrow Down to move, press Space or Enter to drop, or Escape to cancel. Main settings are shared defaults for Main and for inherited fallback fields. Each fallback's Advanced controls let you choose `Inherit default` or `Override`; inherited properties are omitted when saved.
 - **Lazy model picker** — the Model field is populated asynchronously from the local `opencode models --verbose` CLI, with a free-form fallback when the CLI is unavailable. The discovered model IDs appear as autocomplete suggestions alongside each model's capabilities and variants. A reload button lets you re-run discovery at any time.
 - **JSONC preservation** — all writes go through `jsonc-parser` via a per-path diff engine. The `ConfigStore` compares the original and modified config recursively, then calls `modify()` on each changed JSON path individually. Comments, trailing commas, and formatting on untouched keys survive every edit.
-- **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`oh-my-openagent.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
+- **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`omo.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
 - **Profile import and export** — move individual profiles or your whole sidecar in and out as JSON or JSONC. Import a single `{ agents, categories }` fragment, or import a full `{ version: 1, profiles: [...] }` sidecar and choose whether to extend the existing list or replace it. Export one profile or every profile at once.
 - **JSON profile editing** — open a saved profile or the active config's `agents`/`categories` as JSON in an untitled editor, edit freely, and save to apply. Useful for bulk changes that the form editor does not expose.
 - **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away. Three collapsible groups (Agents, Categories, Profiles) with inline edit buttons, context menu actions, and tooltips that show configured parameters on hover.
@@ -32,13 +32,14 @@ The sidebar view shows your active config, all built-in agents and categories wi
 
 Development and packaging require Node.js 22 or newer.
 
-The extension discovers the active config in this order:
+The extension edits the `[opencode]` block of the unified omo config:
 
-1. `~/.config/opencode/oh-my-openagent.json` (Unix) or `%APPDATA%\opencode\oh-my-openagent.json` (Windows)
-2. `~/.config/opencode/oh-my-openagent.jsonc` (Unix) or `%APPDATA%\opencode\oh-my-openagent.jsonc` (Windows)
-3. Legacy `oh-my-opencode.json` / `oh-my-opencode.jsonc` in the same directory
+1. **User layer** — `~/.omo/omo.jsonc` (falling back to `omo.json`) on every platform. This is where all writes go.
+2. **Project layers** — `.omo/omo.jsonc` (then `.omo/omo.json`) in every directory from the workspace root up to your home directory. The nearest project file wins on read and beats the user layer; the extension never writes to project files.
 
-Profiles live next to the active config in `oh-my-openagent.profiles.json`.
+On a fresh install the extension creates `~/.omo/omo.jsonc` on first write. Legacy `oh-my-openagent.json[c]` / `oh-my-opencode.json[c]` files are no longer read — run `bunx oh-my-openagent config migrate` once to import them into the unified file.
+
+Profiles live next to the user config in `omo.profiles.json`. A legacy `oh-my-openagent.profiles.json` sidecar is renamed automatically on first access.
 
 ## Installation
 
@@ -80,7 +81,7 @@ Profiles live next to the active config in `oh-my-openagent.profiles.json`.
 
 The sidebar nests the tree under the active config file:
 
-- **Active config file** — the name of the file currently in use (e.g. `oh-my-openagent.json`). Hover to see the full resolved path. This helps when you have fallback configs across multiple files. It expands to show the active profile (when one is active) and, nested under it, the **Agents** and **Categories** groups. When no profile is active, **Agents** and **Categories** appear directly under the config file.
+- **Active config file** — the name of the user-layer file (e.g. `omo.jsonc`). Hover to see the full resolved path. It expands to show the active profile (when one is active) and, nested under it, the **Agents** and **Categories** groups. When no profile is active, **Agents** and **Categories** appear directly under the config file.
 - **Agents** — built-in agents; overridden agents are shown as override items.
 - **Categories** — built-in categories; overridden categories are shown as override items.
 - **Profiles** — saved snapshots of your agents and categories. A root-level sibling of the config file.
@@ -146,7 +147,7 @@ The extension contributes 16 commands. All are prefixed with **Oh My OpenAgent**
 
 ## Profiles
 
-Profiles are named snapshots of the `agents` and `categories` sections of your active config. They are stored in `oh-my-openagent.profiles.json`, next to your active config file.
+Profiles are named snapshots of the `agents` and `categories` sections of your active config. They are stored in `omo.profiles.json`, next to the user config file.
 
 ### Create a profile
 
@@ -156,7 +157,7 @@ Profiles are named snapshots of the `agents` and `categories` sections of your a
 
 The new profile captures the current agents and categories exactly as they are on disk.
 
-To create a profile from another config file instead of the active config, use `Create Profile from Config File…` (Command Palette or right-click the Profiles group header). It extracts `agents` and `categories` from any Oh My OpenAgent `.json`/`.jsonc` config — a full `oh-my-openagent.jsonc` works; other top-level keys are ignored — and never modifies the active config.
+To create a profile from another config file instead of the active config, use `Create Profile from Config File…` (Command Palette or right-click the Profiles group header). It extracts `agents` and `categories` from any Oh My OpenAgent `.json`/`.jsonc` config — a full `omo.jsonc` works (the `[opencode]` block is merged over the shared base); other top-level keys are ignored — and never modifies the active config.
 
 ### Activate a profile
 
@@ -269,7 +270,7 @@ extension.ts  (activation orchestrator)
 - **Per-path JSONC diffing** — `updateConfig()` deep-clones the parsed config, runs the updater callback, then `diffConfigs()` recursively compares original and draft. Each changed JSON path gets its own `jsonc-parser` `modify()` call, so comments and formatting on untouched keys are never disturbed.
 - **Webview security** — strict CSP with `default-src 'none'`, per-render nonces via `crypto.randomBytes(16)`, local resource roots restricted to `out/` only, and all DOM text insertion uses `.textContent` (never `innerHTML`).
 - **Singleton editor panel** — `AgentEditorPanel` uses a static `currentPanel` reference to prevent multiple webview instances. Panel state survives tab switches via `retainContextWhenHidden: true`.
-- **Sidecar profiles** — profiles are stored in a separate plain JSON file (`oh-my-openagent.profiles.json`) so the main OmO config stays schema-clean. Profile activation writes into the main config through the JSONC-preserving `ConfigStore.updateConfig()` path.
+- **Sidecar profiles** — profiles are stored in a separate plain JSON file (`omo.profiles.json`) so the main OmO config stays schema-clean. Profile activation writes into the main config's `[opencode]` block through the JSONC-preserving `ConfigStore.updateConfig()` path.
 - **Transfer canonical JSON** — export serializes only JSON-safe values (null, booleans, finite numbers, strings, dense arrays, and plain objects), sorts keys, and appends a trailing newline. This prevents accidental disclosure of getters, symbols, or cyclic structures.
 - **Profile JSON editor host** — `profileJsonEditorHost.ts` isolates the active/saved target protocol from the UI, while `ProfileJsonEditor.svelte` provides a focused textarea with save, dirty tracking, and error display.
 
