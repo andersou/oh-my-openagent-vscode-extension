@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-08-01
+
+First stable release on the omo.dev unified config spec, promoting `1.0.0-beta.1` and `1.0.0-beta.2`. The active config is now `~/.omo/omo.jsonc` (user layer) with optional per-project `.omo/omo.jsonc` layers, and the extension edits the `[opencode]` harness block. Agents, categories, and fallback entries support the new `reasoning` field.
+
+### BREAKING CHANGES
+
+- **Config file location** — the extension now reads and writes `~/.omo/omo.jsonc` (fallback `omo.json`) on every platform instead of `~/.config/opencode/oh-my-openagent.json[c]` / `%APPDATA%\opencode\oh-my-openagent.json[c]`. Legacy `oh-my-openagent.json[c]` and `oh-my-opencode.json[c]` files are no longer discovered. Run `bunx oh-my-openagent config migrate` once to import them into the unified file.
+- **Writes target the `[opencode]` block** — all mutations go into the `[opencode]` harness block of the user file. Shared-base keys and sibling harness blocks (`[senpi]`, `[codex]`) are preserved untouched, and JSONC comments/formatting survive every edit as before.
+- **Sidecar rename** — profiles moved from `oh-my-openagent.profiles.json` to `~/.omo/omo.profiles.json`. A legacy sidecar (next to the config, or in `~/.config/opencode`) is renamed automatically on first access.
+
+### Features
+
+- **Project layers (read-only)** — `.omo/omo.jsonc` / `.omo/omo.json` files are discovered walking from the workspace directory up to the home directory and merged into the effective view (nearest layer wins, beating the user layer). Writes always go to the user layer; project-inherited values are never flattened into the user file unless actually changed.
+- **`reasoning` field** — agents, categories, fallback-model entries, and `ultrawork`/`compaction` variants support the new `reasoning` key (`off | minimal | low | medium | high | xhigh | max | auto`), editable in the form editor alongside `reasoningEffort`. Profile import/export round-trips the field.
+- **New-shape profile import** — `Create Profile from Config File…` accepts a unified `omo.jsonc`: it merges shared-base `agents`/`categories` with the `[opencode]` block (harness wins) instead of only reading flat root-level keys.
+
+### Bug Fixes
+
+- **Save payload allow-lists** — `AGENT_FIELDS` and `CATEGORY_FIELDS` include `reasoning`, fixing `Unknown field: reasoning` failures when saving from the form editor (most visibly after adding a fallback).
+
+### Migration
+
+1. Run `bunx oh-my-openagent config migrate` to import legacy `oh-my-openagent.json[c]` files into `~/.omo/omo.jsonc` (upstream moves the legacy files to a backup directory).
+2. Open the extension — profiles migrate automatically on first access.
+
+### Tests
+
+- 529 tests pass (19 files).
+
 ## [1.0.0-beta.2] - 2026-08-01
 
 This pre-release fixes a save-time regression from `1.0.0-beta.1`: saving an agent or category failed with `Unknown field: reasoning`, most visibly after adding a fallback.
@@ -170,6 +199,7 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[1.0.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.6.0-beta.1...v1.0.0
 [0.6.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0...v0.6.0-beta.1
 [0.5.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.4.0...v0.5.0
 [0.5.0-beta.4]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0-beta.3...v0.5.0-beta.4
