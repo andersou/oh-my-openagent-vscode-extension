@@ -9,6 +9,12 @@ import type {
   OmOConfig,
   AgentConfig,
   CategoryConfig,
+  ConfigScope,
+} from './schema.js';
+import {
+  CONFIG_SCOPES,
+  omoConfigKeysForScope,
+  writePrefixForScope,
 } from './schema.js';
 
 // ---------------------------------------------------------------------------
@@ -16,16 +22,10 @@ import type {
 // ---------------------------------------------------------------------------
 const CANDIDATE_FILES = ['omo.jsonc', 'omo.json'] as const;
 
-/** Top-level key of the harness block the extension edits. */
-const OPENCODE_KEY = '[opencode]';
-
-/** OmOConfig keys — the editable surface the extension surfaces. */
-const OMO_CONFIG_KEYS: ReadonlyArray<keyof OmOConfig> = [
-  'agents',
-  'categories',
-  'agent_order',
-  'disabled_agents',
-];
+/** Top-level harness-block keys in a unified omo config file. */
+const HARNESS_KEYS = new Set(
+  CONFIG_SCOPES.filter((s) => s !== 'global').map((s) => `[${s}]`),
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -135,10 +135,11 @@ function diffConfigs(
 }
 
 /** Restrict an arbitrary parsed object to the OmOConfig editable surface. */
-function pickOmOConfig(value: unknown): OmOConfig {
+function pickOmOConfig(value: unknown, scope: ConfigScope): OmOConfig {
   const result: Record<string, unknown> = {};
+  const keys = omoConfigKeysForScope(scope);
   if (isPlainObject(value)) {
-    for (const key of OMO_CONFIG_KEYS) {
+    for (const key of keys) {
       if (value[key] !== undefined) {
         result[key] = value[key];
       }
@@ -204,6 +205,7 @@ export class ConfigStore {
   private readonly workspaceDir: string;
   /** Whether project-layer walking is active. */
   private readonly projectLayersEnabled: boolean;
+  private scope: ConfigScope;
   private configPath: string | null = null;
   private cachedConfig: OmOConfig | null = null;
   private cachedRaw: string | null = null;
@@ -220,10 +222,15 @@ export class ConfigStore {
    *   unless `workspaceDir` is also given. When both are omitted, walking
    *   starts at `process.cwd()`.
    */
-  constructor(baseDir?: string, workspaceDir?: string) {
+  constructor(
+    baseDir?: string,
+    workspaceDir?: string,
+    scope: ConfigScope = 'opencode',
+  ) {
     this.baseDir = baseDir ?? defaultBaseDir();
     this.workspaceDir = workspaceDir ?? process.cwd();
     this.projectLayersEnabled = baseDir === undefined || workspaceDir !== undefined;
+    this.scope = scope;
   }
 
   // ---- Event ----
@@ -264,6 +271,25 @@ export class ConfigStore {
     return this.baseDir;
   }
 
+  /** Return the active config scope. */
+  getScope(): ConfigScope {
+    return this.scope;
+  }
+
+  /**
+   * Switch the active config scope, invalidate the in-memory cache, and emit
+   * a single change event. Calling with the current scope is a no-op.
+   */
+  setScope(scope: ConfigScope): void {
+    if (scope === this.scope) {
+      return;
+    }
+    this.scope = scope;
+    this.cachedConfig = null;
+    this.cachedRaw = null;
+    this._emitter.emit('change');
+  }
+
   // ---- Read ----
 
   /** Read the raw config text from disk. Returns empty string if file does not exist. */
@@ -297,9 +323,10 @@ export class ConfigStore {
 
   /**
    * Compute the effective view: the merged user + project layers, with the
-   * `[opencode]` block overlaid on the shared base. For `agents` and
-   * `categories` the overlay deep-merges per entry; every other `[opencode]`
-   * key overlays (arrays/scalars replace) the base too.
+   * selected scope's harness block overlaid on the shared base. For `agents`
+   * and `categories` the overlay deep-merges per entry; every other harness
+   * key overlays (arrays/scalars replace) the base too. For the `global`
+   * scope only the shared base is folded.
    */
   private computeEffectiveView(
     userRaw: string,
@@ -308,18 +335,24 @@ export class ConfigStore {
     // Fold layers in two passes so the harness block keeps higher priority
     // than the shared base ACROSS layers, matching the documented resolution
     // order (shared base keys first, then the [harness] block; later layers
-    // win within each pass). Pass 1 folds every layer's shared base (user
-    // first, then projects farthest → nearest). Pass 2 folds every layer's
-    // `[opencode]` block in the same order. A project layer's shared-base
-    // value therefore cannot clobber the user layer's [opencode] harness
-    // value for the same key.
+    // win within each pass). The selected harness block is determined by the
+    // active scope; for the global scope there is no harness block pass.
+    const harnessKey = writePrefixForScope(this.scope)[0] ?? null;
     const baseFold: Record<string, unknown> = {};
     const harnessFold: Record<string, unknown> = {};
     const foldLayer = (doc: Record<string, unknown>): void => {
-      const { [OPENCODE_KEY]: harness, ...base } = doc;
+      const base: Record<string, unknown> = {};
+      for (const key of Object.keys(doc)) {
+        if (!HARNESS_KEYS.has(key)) {
+          base[key] = doc[key];
+        }
+      }
       deepMergeInto(baseFold, base);
-      if (isPlainObject(harness)) {
-        deepMergeInto(harnessFold, harness);
+      if (harnessKey !== null) {
+        const harness = doc[harnessKey];
+        if (isPlainObject(harness)) {
+          deepMergeInto(harnessFold, harness);
+        }
       }
     };
 
@@ -337,7 +370,7 @@ export class ConfigStore {
     }
 
     deepMergeInto(baseFold, harnessFold);
-    return pickOmOConfig(baseFold);
+    return pickOmOConfig(baseFold, this.scope);
   }
 
   /** Refresh the in-memory cache from disk. */
@@ -390,12 +423,12 @@ export class ConfigStore {
    * preserved.
    *
    * Patches are computed as `diff(effectiveView, draft)` and applied to the
-   * USER file under the `['[opencode]', ...]` prefix. This means values
-   * inherited from project layers are only written to the user file when the
-   * updater actually changed them — project-layer content is never flattened
-   * into the user layer. When the updater overrides a project-inherited
-   * value, the new value lands in the user file's `[opencode]` block and
-   * wins on subsequent reads (correct precedence).
+   * USER file under the scope's write prefix (`[]` for global, `['[<scope>]']`
+   * for harness scopes). This means values inherited from project layers are
+   * only written to the user file when the updater actually changed them —
+   * project-layer content is never flattened into the user layer. When the
+   * updater overrides a project-inherited value, the new value lands under the
+   * selected scope prefix and wins on subsequent reads (correct precedence).
    */
   async updateConfig(updater: (draft: OmOConfig) => void): Promise<void> {
     // Ensure cache is populated
@@ -405,6 +438,15 @@ export class ConfigStore {
     const effective = this.cachedConfig!;
     const draft = deepClone(effective);
     updater(draft);
+
+    // Defensively strip keys that the active scope does not allow, so only
+    // schema-accepted keys can ever reach omo.jsonc.
+    const allowedKeys = new Set<string>(omoConfigKeysForScope(this.scope));
+    for (const key of Object.keys(draft)) {
+      if (!allowedKeys.has(key)) {
+        delete (draft as Record<string, unknown>)[key];
+      }
+    }
 
     // Diff effective view ↔ draft — only actual updater changes are written
     const patches = diffConfigs(effective, draft);
@@ -421,17 +463,19 @@ export class ConfigStore {
 
     // Apply edits sequentially — each modify generates edits relative to
     // the current text, and applyEdits produces the new base for the next.
-    // All paths are prefixed with '[opencode]': writes ALWAYS target the
-    // user file's harness block, never the shared base or project layers.
-    // When the file is missing/empty, seed a minimal document so modify()
-    // has a valid base; jsonc-parser creates the '[opencode]' block and any
-    // intermediate objects automatically.
+    // Paths are prefixed with the scope's write prefix: [] for global,
+    // ['[<scope>]'] for harness scopes. Writes ALWAYS target the user file
+    // under that prefix, never the shared base or project layers. When the
+    // file is missing/empty, seed a minimal document so modify() has a valid
+    // base; jsonc-parser creates the block and any intermediate objects
+    // automatically.
+    const prefix = writePrefixForScope(this.scope);
     let text = this.cachedRaw ?? '';
     if (!text.trim()) {
-      text = `{\n  "${OPENCODE_KEY}": {}\n}`;
+      text = prefix.length === 0 ? '{}' : `{\n  "${prefix[0]}": {}\n}`;
     }
     for (const [jsonPath, value] of patches) {
-      const edits: EditResult = modify(text, [OPENCODE_KEY, ...jsonPath], value, {
+      const edits: EditResult = modify(text, [...prefix, ...jsonPath], value, {
         formattingOptions: {
           tabSize: 2,
           insertSpaces: true,
