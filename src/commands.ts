@@ -29,6 +29,7 @@ import type {
   AgentModelTreeProvider,
 } from './ui/agentModelTreeProvider.js';
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
+import { CONFIG_SCOPES, type ConfigScope } from './config/schema.js';
 import {
   createProfileTransferCommandContext,
   registerProfileTransferCommands,
@@ -39,7 +40,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Register all 15 commands declared in `package.json` and return a single
+ * Register all 17 commands declared in `package.json` and return a single
  * `Disposable` that unregisters them all. The activation code pushes the
  * returned value into `context.subscriptions`.
  */
@@ -114,7 +115,40 @@ export function registerCommands(
       treeProvider.refresh();
     }),
 
-    // 5. Create a new profile by snapshotting the current config.
+    // 5. Select the active config scope.
+    vscode.commands.registerCommand(
+      'ohMyOpenAgent.selectConfigScope',
+      async () => {
+        const currentScope = configStore.getScope();
+        const items = CONFIG_SCOPES.map((scope) => ({
+          label: scope,
+          picked: scope === currentScope,
+          description: scope === currentScope ? 'Current' : undefined,
+        }));
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select the active config scope',
+        });
+        if (picked === undefined) {
+          return; // user cancelled
+        }
+        const scope = picked.label as ConfigScope;
+        if (scope === currentScope) {
+          return;
+        }
+        try {
+          await profileStore.setConfigScope(scope);
+          configStore.setScope(scope);
+          AgentEditorPanel.closeCurrentPanel();
+          void vscode.window.showInformationMessage(
+            `The config scope changed to "${scope}". The agent editor was closed to avoid stale edits.`,
+          );
+        } catch (err) {
+          reportError('Failed to set config scope', err);
+        }
+      },
+    ),
+
+    // 6. Create a new profile by snapshotting the current config.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.createProfile',
       async () => {

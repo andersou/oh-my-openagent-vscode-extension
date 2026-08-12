@@ -294,6 +294,10 @@ export class AgentEditorPanel implements vscode.Disposable {
     context.subscriptions.push(instance);
   }
 
+  public static closeCurrentPanel(): void {
+    AgentEditorPanel.currentPanel?.dispose();
+  }
+
   public dispose(): void {
     if (AgentEditorPanel.currentPanel === this) {
       AgentEditorPanel.currentPanel = undefined;
