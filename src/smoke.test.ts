@@ -324,9 +324,11 @@ describe('smoke: end-to-end editor flow', () => {
     expect(raw).toContain('// initial comment');
     expect(raw).toContain('"anthropic/claude-haiku"');
     expect(raw).toContain('"temperature": 0.5');
-    expect(raw).toContain('"fallback_models"');
+    expect(raw).toContain('"models"');
     expect(raw).toContain('"openai/gpt-4"');
     expect(raw).not.toContain('"old/model"');
+    expect(raw).not.toContain('"fallback_models"');
+    expect(raw).not.toContain('"main_overrides"');
 
     const agent = configStore.getAgent('sisyphus');
     expect(agent?.model).toBe('anthropic/claude-haiku');

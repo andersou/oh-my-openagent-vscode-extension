@@ -24,6 +24,7 @@ import {
   exportProfileFragment,
   resolveProfileNameCollisions,
 } from './profileTransferSerialization.js';
+import { toInternalRoutingFragment } from './routingConversion.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,6 +66,26 @@ function deepEqual(a: unknown, b: unknown): boolean {
     if (!deepEqual(aObj[key], bObj[key])) return false;
   }
   return true;
+}
+
+/**
+ * Profiles are stored in the internal routing representation, so a fragment
+ * arriving from a public omo config is converted on the way in (no-op for one
+ * that already uses `model` / `main_overrides` / `fallback_models`).
+ */
+function internalFragment(fragment: ProfileFragment): ProfileFragment {
+  return toInternalRoutingFragment(cloneProfileFragment(fragment));
+}
+
+function internalProfile(profile: Profile): Profile {
+  const converted = toInternalRoutingFragment(profile);
+  return {
+    ...profile,
+    ...(profile.agents === undefined ? {} : { agents: converted.agents }),
+    ...(profile.categories === undefined
+      ? {}
+      : { categories: converted.categories }),
+  };
 }
 
 export interface ActiveProfileModification {
@@ -178,7 +199,9 @@ export class ProfileStore {
       const raw = fs.readFileSync(sidecarPath, 'utf-8');
       const data = JSON.parse(raw) as ProfilesFile;
       return {
-        profiles: Array.isArray(data.profiles) ? data.profiles : [],
+        profiles: Array.isArray(data.profiles)
+          ? data.profiles.map(internalProfile)
+          : [],
         lastActiveProfile: data.lastActiveProfile,
         version: data.version ?? 1,
         configScope: data.configScope,
@@ -280,7 +303,7 @@ export class ProfileStore {
       throw new Error(`Profile "${name}" not found`);
     }
 
-    const clone = cloneProfileFragment(fragment);
+    const clone = internalFragment(fragment);
     if (clone.agents === undefined) {
       delete profile.agents;
     } else {
@@ -309,7 +332,7 @@ export class ProfileStore {
   async replaceActiveConfigFragment(
     fragment: ProfileFragment,
   ): Promise<void> {
-    const clone = cloneProfileFragment(fragment);
+    const clone = internalFragment(fragment);
 
     await this.configStore.updateConfig((draft: OmOConfig) => {
       if (clone.agents === undefined) {
@@ -372,7 +395,7 @@ export class ProfileStore {
     }
 
     const now = new Date().toISOString();
-    const clone = cloneProfileFragment(fragment);
+    const clone = internalFragment(fragment);
 
     const profile: Profile = {
       name,
@@ -602,7 +625,7 @@ export class ProfileStore {
     ]);
 
     const now = new Date().toISOString();
-    const clone = cloneProfileFragment(fragment);
+    const clone = internalFragment(fragment);
     const profile: Profile = {
       name: resolvedName,
       agents: clone.agents,
@@ -636,7 +659,7 @@ export class ProfileStore {
     mode: 'extend' | 'replace',
   ): Promise<ImportProfilesResult> {
     const data = this.readProfilesFile();
-    const imported = cloneProfilesFile(sidecar).profiles;
+    const imported = cloneProfilesFile(sidecar).profiles.map(internalProfile);
 
     const existingNames =
       mode === 'extend' ? data.profiles.map((p) => p.name) : [];

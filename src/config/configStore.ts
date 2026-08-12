@@ -16,6 +16,14 @@ import {
   omoConfigKeysForScope,
   writePrefixForScope,
 } from './schema.js';
+import type { PublicOmOConfig } from './routingConversion.js';
+import {
+  ROUTING_ENTITY_KEYS,
+  hasLegacyRouting,
+  toInternalRoutingConfig,
+  toPublicRoutingConfig,
+  toPublicRoutingEntry,
+} from './routingConversion.js';
 
 // ---------------------------------------------------------------------------
 // Candidate filenames checked in priority order (omo.dev unified config spec)
@@ -82,8 +90,8 @@ function deepMergeInto(
  * pairs for every change. A value of `undefined` means the key was removed.
  */
 function diffConfigs(
-  original: OmOConfig,
-  draft: OmOConfig,
+  original: object,
+  draft: object,
   basePath: JSONPath = [],
 ): Array<[JSONPath, unknown]> {
   const patches: Array<[JSONPath, unknown]> = [];
@@ -116,13 +124,7 @@ function diffConfigs(
       }
     } else if (isPlainObject(draftVal) && isPlainObject(origVal)) {
       // Both are plain objects — recurse
-      patches.push(
-        ...diffConfigs(
-          origVal as unknown as OmOConfig,
-          draftVal as unknown as OmOConfig,
-          childPath,
-        ),
-      );
+      patches.push(...diffConfigs(origVal, draftVal, childPath));
     } else {
       // Primitive comparison
       if (origVal !== draftVal) {
@@ -370,7 +372,8 @@ export class ConfigStore {
     }
 
     deepMergeInto(baseFold, harnessFold);
-    return pickOmOConfig(baseFold, this.scope);
+    // Disk speaks the public routing dialect; every caller sees the internal one.
+    return toInternalRoutingConfig(pickOmOConfig(baseFold, this.scope));
   }
 
   /** Refresh the in-memory cache from disk. */
@@ -448,8 +451,15 @@ export class ConfigStore {
       }
     }
 
-    // Diff effective view ↔ draft — only actual updater changes are written
-    const patches = diffConfigs(effective, draft);
+    // Diff effective view ↔ draft in the public dialect — only actual updater
+    // changes are written — after migrating routing keys the public schema
+    // rejects, so the updater's changes always win over the migration.
+    const prefix = writePrefixForScope(this.scope);
+    const publicDraft = toPublicRoutingConfig(draft);
+    const patches = [
+      ...this.legacyRoutingPatches(prefix, publicDraft),
+      ...diffConfigs(toPublicRoutingConfig(effective), publicDraft),
+    ];
     if (patches.length === 0) {
       return; // nothing changed
     }
@@ -469,7 +479,6 @@ export class ConfigStore {
     // file is missing/empty, seed a minimal document so modify() has a valid
     // base; jsonc-parser creates the block and any intermediate objects
     // automatically.
-    const prefix = writePrefixForScope(this.scope);
     let text = this.cachedRaw ?? '';
     if (!text.trim()) {
       text = prefix.length === 0 ? '{}' : `{\n  "${prefix[0]}": {}\n}`;
@@ -501,10 +510,56 @@ export class ConfigStore {
       }, 200);
     }
 
-    // Update cache
+    // Update cache with the round-tripped view, so it matches a fresh read
     this.cachedRaw = text;
-    this.cachedConfig = draft;
+    this.cachedConfig = toInternalRoutingConfig(publicDraft);
     this._emitter.emit('change');
+  }
+
+  /**
+   * Patches that rewrite routing keys the public schema rejects
+   * (`main_overrides`, `fallback_models`, a reasoning-style `variant`) into
+   * their public equivalents wherever they are still literally present in the
+   * user file. Each entity is converted from its own raw text — never from the
+   * merged effective view — so project-layer values are not flattened into the
+   * user layer. Entities the updater removed are skipped.
+   */
+  private legacyRoutingPatches(
+    prefix: readonly string[],
+    publicDraft: PublicOmOConfig,
+  ): Array<[JSONPath, unknown]> {
+    const document = this.parseJson(this.cachedRaw ?? '', this.getConfigPath());
+    const scopeRoot = prefix.length === 0 ? document : document[prefix[0]];
+    if (!isPlainObject(scopeRoot)) {
+      return [];
+    }
+    const patches: Array<[JSONPath, unknown]> = [];
+    for (const group of ['agents', 'categories'] as const) {
+      const rawGroup = scopeRoot[group];
+      const draftGroup = publicDraft[group];
+      if (!isPlainObject(rawGroup) || draftGroup === undefined) {
+        continue;
+      }
+      for (const [name, rawEntry] of Object.entries(rawGroup)) {
+        if (!isPlainObject(rawEntry) || !hasLegacyRouting(rawEntry)) {
+          continue;
+        }
+        if (!Object.hasOwn(draftGroup, name)) {
+          continue;
+        }
+        const converted = toPublicRoutingEntry(rawEntry);
+        if (hasLegacyRouting(converted)) {
+          continue;
+        }
+        for (const key of ROUTING_ENTITY_KEYS) {
+          if (JSON.stringify(rawEntry[key]) === JSON.stringify(converted[key])) {
+            continue;
+          }
+          patches.push([[group, name, key], converted[key]]);
+        }
+      }
+    }
+    return patches;
   }
 
   // ---- File watching ----

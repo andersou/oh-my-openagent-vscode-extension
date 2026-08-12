@@ -5,6 +5,7 @@ import {
   type UnvalidatedProfileFragmentRoot,
 } from '../config/profileTransfer.js';
 import type { ProfileStore } from '../config/profileStore.js';
+import { toInternalRoutingFragment } from '../config/routingConversion.js';
 import {
   validateProfileTransfer,
   type ProfileFragment,
@@ -102,7 +103,7 @@ export async function saveProfileJson(
   if (validateResult.value.kind !== 'fragment') {
     return { ok: false, message: 'Expected a profile fragment (agents/categories)' };
   }
-  const fragment = validateResult.value.value;
+  const fragment = toInternalRoutingFragment(validateResult.value.value);
   const canonicalText = serializeProfileTransfer(fragment);
 
   try {
