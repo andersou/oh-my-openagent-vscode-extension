@@ -3,11 +3,17 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type {
   AgentConfig,
   CategoryConfig,
+  ConfigScope,
   FallbackModelConfig,
   ModelVariantConfig,
   Profile,
   ProfilesFile,
   Reasoning,
+} from './schema.js';
+import {
+  CONFIG_SCOPES,
+  omoConfigKeysForScope,
+  writePrefixForScope,
 } from './schema.js';
 
 type IsAssignable<Source, Target> = Source extends Target ? true : false;
@@ -146,5 +152,54 @@ describe('profile schema contract', () => {
     expect(REASONING_SURFACE.category.reasoning).toBe('xhigh');
     expect(REASONING_SURFACE.fallback.reasoning).toBe('off');
     expect(REASONING_SURFACE.variant.reasoning).toBe('max');
+  });
+});
+
+describe('config scope model', () => {
+  it('pins the exact ordered scope tuple', () => {
+    expect(CONFIG_SCOPES).toEqual(['global', 'opencode', 'senpi', 'codex']);
+    expectTypeOf<typeof CONFIG_SCOPES>().toEqualTypeOf<
+      readonly ['global', 'opencode', 'senpi', 'codex']
+    >();
+    expectTypeOf<ConfigScope>().toEqualTypeOf<
+      'global' | 'opencode' | 'senpi' | 'codex'
+    >();
+  });
+
+  it('returns the correct write prefix for every scope', () => {
+    expect(writePrefixForScope('global')).toEqual([]);
+    expect(writePrefixForScope('opencode')).toEqual(['[opencode]']);
+    expect(writePrefixForScope('senpi')).toEqual(['[senpi]']);
+    expect(writePrefixForScope('codex')).toEqual(['[codex]']);
+  });
+
+  it('returns the correct OmOConfig keys for every scope', () => {
+    // Upstream schema facts:
+    // - [opencode] is a superset that also includes agent_order and disabled_agents
+    // - [senpi] and [codex] allow only categories, agents, codegraph, task, teams,
+    //   models, memory, telemetry among the root properties, which maps to
+    //   agents/categories within OmOConfig keys.
+    // - The shared base (global) does not include agent_order or disabled_agents.
+    expect(omoConfigKeysForScope('opencode')).toEqual([
+      'agents',
+      'categories',
+      'agent_order',
+      'disabled_agents',
+    ]);
+    expect(omoConfigKeysForScope('global')).toEqual(['agents', 'categories']);
+    expect(omoConfigKeysForScope('senpi')).toEqual(['agents', 'categories']);
+    expect(omoConfigKeysForScope('codex')).toEqual(['agents', 'categories']);
+  });
+
+  it('allows ProfilesFile to carry an optional configScope', () => {
+    // Given
+    const scopedFile: ProfilesFile = {
+      profiles: [],
+      configScope: 'opencode',
+    };
+
+    // Then
+    expect(scopedFile.configScope).toBe('opencode');
+    expectTypeOf<NonNullable<ProfilesFile['configScope']>>().toEqualTypeOf<ConfigScope>();
   });
 });

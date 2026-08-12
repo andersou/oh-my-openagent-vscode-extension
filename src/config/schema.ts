@@ -165,6 +165,22 @@ export interface OmOConfig {
   disabled_agents?: string[];
 }
 
+export type ConfigScope = 'global' | 'opencode' | 'senpi' | 'codex';
+
+export const CONFIG_SCOPES = ['global', 'opencode', 'senpi', 'codex'] as const;
+
+export function writePrefixForScope(scope: ConfigScope): readonly string[] {
+  return scope === 'global' ? [] : [`[${scope}]`];
+}
+
+export function omoConfigKeysForScope(
+  scope: ConfigScope,
+): ReadonlyArray<keyof OmOConfig> {
+  return scope === 'opencode'
+    ? ['agents', 'categories', 'agent_order', 'disabled_agents']
+    : ['agents', 'categories'];
+}
+
 export interface Profile {
   name: string;
   description?: string;
@@ -184,4 +200,5 @@ export interface ProfilesFile {
   profiles: Profile[];
   lastActiveProfile?: string;
   version?: number;
+  configScope?: ConfigScope;
 }
