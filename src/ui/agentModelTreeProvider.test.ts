@@ -74,12 +74,22 @@ function makeConfigStoreStub(
   agents: Record<string, object> = {},
   categories: Record<string, object> = {},
   configPath: string = '/fake/path/oh-my-openagent.json',
+  initialScope: string = 'opencode',
 ): ConfigStore {
+  let scope = initialScope;
+  const emitter = new EventEmitter();
   return {
-    onDidChange: new EventEmitter(),
+    onDidChange: emitter,
     getAgent: (name: string) => agents[name] as { model?: string } | undefined,
     getCategory: (name: string) => categories[name] as { model?: string } | undefined,
     getConfigPath: () => configPath,
+    getScope: () => scope,
+    setScope: (newScope: string) => {
+      if (newScope !== scope) {
+        scope = newScope;
+        emitter.emit('change');
+      }
+    },
   } as unknown as ConfigStore;
 }
 
@@ -139,6 +149,19 @@ describe('AgentModelTreeProvider', () => {
     expect(roots[1].kind).toBe('group');
     expect(roots[1].label).toBe('Profiles');
     expect(roots[1].group).toBe('profiles');
+  });
+
+  it('shows the active config scope as the description on the configFile root item', () => {
+    const roots = provider.getChildren();
+    const configFile = roots[0];
+    expect(configFile.kind).toBe('configFile');
+    expect(configFile.description).toBe('opencode');
+
+    configStore.setScope('senpi');
+    const rootsAfter = provider.getChildren();
+    const configFileAfter = rootsAfter[0];
+    expect(configFileAfter.kind).toBe('configFile');
+    expect(configFileAfter.description).toBe('senpi');
   });
 
   it('exposes Agents and Categories under the configFile when no profile is active', () => {
