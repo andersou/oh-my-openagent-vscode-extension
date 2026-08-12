@@ -60,6 +60,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "ohMyOpenAgent.selectConfigScope",
+        "title": "Select Config Scope",
+        "category": "Oh My OpenAgent",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "ohMyOpenAgent.createProfile",
         "title": "Create Profile",
         "category": "Oh My OpenAgent"
@@ -236,6 +242,11 @@
       "view/title": [
         {
           "command": "ohMyOpenAgent.refresh",
+          "when": "view == ohMyOpenAgent.models",
+          "group": "navigation"
+        },
+        {
+          "command": "ohMyOpenAgent.selectConfigScope",
           "when": "view == ohMyOpenAgent.models",
           "group": "navigation"
         },
