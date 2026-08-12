@@ -22,6 +22,7 @@ The sidebar view shows your active config, all built-in agents and categories wi
 - **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`omo.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
 - **Profile import and export** — move individual profiles or your whole sidecar in and out as JSON or JSONC. Import a single `{ agents, categories }` fragment, or import a full `{ version: 1, profiles: [...] }` sidecar and choose whether to extend the existing list or replace it. Export one profile or every profile at once.
 - **JSON profile editing** — open a saved profile or the active config's `agents`/`categories` as JSON in an untitled editor, edit freely, and save to apply. Useful for bulk changes that the form editor does not expose.
+- **Selectable config scope** — choose whether the extension edits the shared base (`global`) or a harness block (`opencode`, `senpi`, `codex`) of `omo.jsonc`. The active scope is shown next to the config file in the sidebar, and switching scopes closes any open agent editor to prevent stale edits.
 - **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away. Three collapsible groups (Agents, Categories, Profiles) with inline edit buttons, context menu actions, and tooltips that show configured parameters on hover.
 - **Commands where they belong**: `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are available from the Command Palette and view title. Editing, override management, profile actions, and JSON editing appear only when their sidebar context applies.
 
@@ -32,7 +33,26 @@ The sidebar view shows your active config, all built-in agents and categories wi
 
 Development and packaging require Node.js 22 or newer.
 
-The extension edits the `[opencode]` block of the unified omo config:
+Development and packaging require Node.js 22 or newer.
+
+## Config scope
+
+The extension can edit different parts of the unified `omo.jsonc` config. Choose the active **config scope** to control where agent and category overrides are written:
+
+- **`global`** — the shared base of `omo.jsonc`. Use this for settings that apply to every harness. Only `agents` and `categories` are written here; `agent_order` and `disabled_agents` are ignored/stripped if present.
+- **`opencode`** — the `[opencode]` harness block. This is the default scope. All OmO keys (`agents`, `categories`, `agent_order`, `disabled_agents`) can be written here.
+- **`senpi`** — the `[senpi]` harness block. Only `agents` and `categories` are written here.
+- **`codex`** — the `[codex]` harness block. Only `agents` and `categories` are written here.
+
+Switch scopes with the `Oh My OpenAgent: Select Config Scope` command. It is available from the Command Palette and from the gear icon in the Models view title. The command shows the four scopes, marks the current one, and updates the active scope on selection.
+
+Your choice is persisted as a `configScope` field inside the `omo.profiles.json` sidecar file, next to the user config. It is **not** stored as a VS Code setting. On activation the extension restores the persisted scope, falling back to `opencode` when none is saved.
+
+The sidebar tree root item shows the active scope next to the config file name (for example, `omo.jsonc` with description `opencode`). Switching scope closes any open agent editor and shows an information message, so you do not accidentally save edits into the wrong block.
+
+The active scope controls all writes: agent/category editor saves, profile activation, and the active-profile JSON editor all target the selected scope. Project-layer reads still merge the shared base with the selected harness block; sibling harness blocks and base keys outside the selected scope are preserved untouched.
+
+### Config file layers
 
 1. **User layer** — `~/.omo/omo.jsonc` (falling back to `omo.json`) on every platform. This is where all writes go.
 2. **Project layers** — `.omo/omo.jsonc` (then `.omo/omo.json`) in every directory from the workspace root up to your home directory. The nearest project file wins on read and beats the user layer; the extension never writes to project files.
@@ -40,6 +60,11 @@ The extension edits the `[opencode]` block of the unified omo config:
 On a fresh install the extension creates `~/.omo/omo.jsonc` on first write. Legacy `oh-my-openagent.json[c]` / `oh-my-opencode.json[c]` files are no longer read — run `bunx oh-my-openagent config migrate` once to import them into the unified file.
 
 Profiles live next to the user config in `omo.profiles.json`. A legacy `oh-my-openagent.profiles.json` sidecar is renamed automatically on first access.
+
+## Requirements
+
+- VS Code 1.85 or newer
+- An existing Oh My OpenAgent configuration, or a first-run scenario where the extension will create one for you
 
 ## Installation
 
@@ -124,11 +149,12 @@ The view title also provides `Refresh`, `Create Profile`, `Import Profiles`, and
 
 ## Commands
 
-The extension contributes 16 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Refresh`, `Create Profile`, `Create Profile from Config File…`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
+The extension contributes 17 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Select Config Scope`, `Refresh`, `Create Profile`, `Create Profile from Config File…`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
 
 | Command | Availability | What it does |
 | --- | --- | --- |
 | `Open Agent Manager` | Command Palette | Focuses the `Oh My OpenAgent` sidebar view. |
+| `Select Config Scope` | Command Palette and view title | Opens a quick pick to choose the active config scope (`global`, `opencode`, `senpi`, `codex`). Command id: `ohMyOpenAgent.selectConfigScope`. |
 | `Edit Agent` | Contextual | Opens the editor for the selected agent. |
 | `Edit Category` | Contextual | Opens the editor for the selected category. |
 | `Refresh` | Command Palette and view title | Refreshes the Models tree from disk. |
@@ -239,7 +265,7 @@ The extension follows a clean layered architecture with strict separation of con
 ```
 extension.ts  (activation orchestrator)
      |
-     ├── commands.ts  (16 command registrations)
+     ├── commands.ts  (17 command registrations)
      |
      ├── profileTransferCommands.ts  (import/export/JSON-edit handlers)
      │   ├── profileTransferCommandHandlers.ts
@@ -270,9 +296,10 @@ extension.ts  (activation orchestrator)
 - **Per-path JSONC diffing** — `updateConfig()` deep-clones the parsed config, runs the updater callback, then `diffConfigs()` recursively compares original and draft. Each changed JSON path gets its own `jsonc-parser` `modify()` call, so comments and formatting on untouched keys are never disturbed.
 - **Webview security** — strict CSP with `default-src 'none'`, per-render nonces via `crypto.randomBytes(16)`, local resource roots restricted to `out/` only, and all DOM text insertion uses `.textContent` (never `innerHTML`).
 - **Singleton editor panel** — `AgentEditorPanel` uses a static `currentPanel` reference to prevent multiple webview instances. Panel state survives tab switches via `retainContextWhenHidden: true`.
-- **Sidecar profiles** — profiles are stored in a separate plain JSON file (`omo.profiles.json`) so the main OmO config stays schema-clean. Profile activation writes into the main config's `[opencode]` block through the JSONC-preserving `ConfigStore.updateConfig()` path.
+- **Sidecar profiles and config scope** — profiles are stored in a separate plain JSON file (`omo.profiles.json`) so the main OmO config stays schema-clean. Profile activation writes into the active scope of the main config through the JSONC-preserving `ConfigStore.updateConfig()` path. The chosen scope is persisted in the sidecar's `configScope` field and restored on activation.
 - **Transfer canonical JSON** — export serializes only JSON-safe values (null, booleans, finite numbers, strings, dense arrays, and plain objects), sorts keys, and appends a trailing newline. This prevents accidental disclosure of getters, symbols, or cyclic structures.
 - **Profile JSON editor host** — `profileJsonEditorHost.ts` isolates the active/saved target protocol from the UI, while `ProfileJsonEditor.svelte` provides a focused textarea with save, dirty tracking, and error display.
+- **Scope-aware writes** — `ConfigStore` carries a `ConfigScope` value (`global`, `opencode`, `senpi`, or `codex`). Reads merge the shared base with the selected harness block; writes prefix each JSONC patch with the matching harness block or target the root for `global`. The active scope is saved to and restored from `omo.profiles.json` via `ProfileStore`, so the same scope is active across extension restarts without touching VS Code settings.
 
 ### Built-in inventory
 
@@ -321,7 +348,7 @@ Tests are written with Vitest. The suite covers the extension's main behaviors:
 | `profileTransferFiles.test.ts` | VS Code open/save dialog helpers and successful transfer-file operations |
 | `profileTransferFiles.rejections.test.ts` | Primitive rejection contract for transfer-file dialog failures |
 | `smoke.test.ts` | End-to-end editor saves across stores, panel, tree, JSONC writes, profile transfer round-trips, and JSON editing |
-| `packageMenus.test.ts` | The 15-command contribution surface and contextual menu visibility |
+| `packageMenus.test.ts` | The 17-command contribution surface and contextual menu visibility |
 | `configStore.test.ts` | Config discovery, JSONC parsing, formatting-preserving updates, key removal, and file watching |
 | `modelRouting.test.ts` | Ordered-card promotion, shared defaults, fallback inheritance and overrides, serialization, removal, and session-bound routing intent |
 | `modelCapabilities.test.ts` | Capability validation for effective inherited and overridden settings |

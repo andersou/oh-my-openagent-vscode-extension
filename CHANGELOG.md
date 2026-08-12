@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Features
+
+- feat: selectable config scope (`global`, `opencode`, `senpi`, `codex`) — switch the active config scope from the Command Palette or the view title gear icon; the choice persists in `omo.profiles.json` under `configScope`, and only the `opencode` scope writes `agent_order`/`disabled_agents`.
+
 ## [1.0.0] - 2026-08-01
 
 First stable release on the omo.dev unified config spec, promoting `1.0.0-beta.1` and `1.0.0-beta.2`. The active config is now `~/.omo/omo.jsonc` (user layer) with optional per-project `.omo/omo.jsonc` layers, and the extension edits the `[opencode]` harness block. Agents, categories, and fallback entries support the new `reasoning` field.
