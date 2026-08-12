@@ -9,6 +9,7 @@ import {
   stringValue,
   type ValidationPath,
 } from './profileValidationPrimitives.js';
+import { PUBLIC_MODEL_ENTRY_KEYS } from './routingConversion.js';
 import type { ReasoningEffort } from './schema.js';
 
 interface ModelValidationPolicy {
@@ -16,10 +17,7 @@ interface ModelValidationPolicy {
   readonly editorCompatibility: boolean;
 }
 
-const MODEL_KEYS: readonly string[] = [
-  'model', 'variant', 'reasoning', 'reasoningEffort', 'temperature', 'top_p', 'maxTokens',
-  'thinking',
-];
+const MODEL_KEYS: readonly string[] = PUBLIC_MODEL_ENTRY_KEYS;
 const MAIN_OVERRIDE_KEYS = MODEL_KEYS.filter((key) => key !== 'model');
 const REASONING_EFFORTS: readonly ReasoningEffort[] = [
   'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
@@ -137,6 +135,24 @@ function modelSettings(
   }
 }
 
+function modelEntry(
+  value: unknown,
+  path: ValidationPath,
+  editorCompatibility: boolean,
+): void {
+  if (typeof value === 'string') return nonblankString(value, path);
+  if (editorCompatibility && !isPlainObject(value)) {
+    fail('invalid_type', path, 'must be a string or a plain object');
+  }
+  const object = plainObject(value, path);
+  if (!editorCompatibility) knownKeys(object, MODEL_KEYS, path);
+  modelSettings(
+    object,
+    path,
+    editorCompatibility ? EDITOR_REQUIRED : TRANSFER_REQUIRED,
+  );
+}
+
 function fallbackModels(
   value: unknown,
   path: ValidationPath,
@@ -146,20 +162,16 @@ function fallbackModels(
   if (!Array.isArray(value)) {
     fail('invalid_type', path, 'must be a string or an array');
   }
-  value.forEach((fallback, index) => {
-    const itemPath = [...path, index];
-    if (typeof fallback === 'string') return nonblankString(fallback, itemPath);
-    if (editorCompatibility && !isPlainObject(fallback)) {
-      fail('invalid_type', itemPath, 'must be a string or a plain object');
-    }
-    const object = plainObject(fallback, itemPath);
-    if (!editorCompatibility) knownKeys(object, MODEL_KEYS, itemPath);
-    modelSettings(
-      object,
-      itemPath,
-      editorCompatibility ? EDITOR_REQUIRED : TRANSFER_REQUIRED,
-    );
-  });
+  value.forEach((fallback, index) =>
+    modelEntry(fallback, [...path, index], editorCompatibility),
+  );
+}
+
+function models(value: unknown, path: ValidationPath): void {
+  if (!Array.isArray(value)) {
+    fail('invalid_type', path, 'must be an array');
+  }
+  value.forEach((entry, index) => modelEntry(entry, [...path, index], false));
 }
 
 function mainOverrides(
@@ -196,6 +208,9 @@ export function validateTransferBaseSettings(
   path: ValidationPath,
 ): void {
   modelSettings(object, path, TRANSFER_OPTIONAL);
+  if (Object.hasOwn(object, 'models')) {
+    models(object.models, [...path, 'models']);
+  }
   if (Object.hasOwn(object, 'fallback_models')) {
     fallbackModels(object.fallback_models, [...path, 'fallback_models'], false);
   }

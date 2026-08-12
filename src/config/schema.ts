@@ -90,11 +90,17 @@ export interface FallbackModelConfig {
   reasoningEffort?: ReasoningEffort;
   temperature?: number;
   top_p?: number;
+  max_tokens?: number;
+  provider_options?: Record<string, unknown>;
   maxTokens?: number;
+  providerOptions?: Record<string, unknown>;
+  textVerbosity?: TextVerbosity;
   thinking?: ThinkingConfig;
 }
 
 export type MainOverrides = Omit<FallbackModelConfig, 'model'>;
+
+export type PublicModelEntry = string | FallbackModelConfig;
 
 export type FallbackModels = string | Array<string | FallbackModelConfig>;
 export type ToolConfig = Record<string, boolean>;
@@ -112,6 +118,7 @@ export interface PermissionConfig {
 
 export interface AgentConfig {
   model?: string;
+  models?: PublicModelEntry[];
   variant?: string;
   fallback_models?: FallbackModels;
   main_overrides?: MainOverrides;
@@ -140,6 +147,7 @@ export interface AgentConfig {
 
 export interface CategoryConfig {
   model?: string;
+  models?: PublicModelEntry[];
   variant?: string;
   fallback_models?: FallbackModels;
   main_overrides?: MainOverrides;
