@@ -281,6 +281,7 @@ extension.ts  (activation orchestrator)
      │
      └── config/
          ├── schema.ts  (TypeScript types for OmO config)
+         ├── routingConversion.ts  (internal ↔ public model routing)
          ├── configStore.ts  (JSONC read/write, file watching)
          ├── profileStore.ts  (profile CRUD, activation, import/export)
          ├── profileTransfer.ts  (parser and byte-limit/UTF-8 validation)
@@ -292,6 +293,7 @@ extension.ts  (activation orchestrator)
 ### Key design decisions
 
 - **ConfigStore is pure Node.js** — zero VS Code dependency, making it testable in isolation with vitest. File watching uses `fs.watch` with 150 ms debounce and a `suppressWatch` flag to ignore self-triggered events during atomic writes.
+- **Routing conversion at the disk boundary** — the editor and saved profiles keep the internal routing shape (`model`, `main_overrides`, `fallback_models`), while `omo.jsonc` only ever receives what the upstream schema accepts: one ordered `models` array whose first entry is the main model merged with its overrides, and `reasoning` in place of a reasoning-level `variant`. `routingConversion.ts` holds both directions; `ConfigStore` converts on every read and every write, and rewrites deprecated routing keys it finds in the user file on the next write. A provider/model `variant` is left alone.
 - **Atomic writes everywhere** — both `ConfigStore` and `ProfileStore` write via temp-file + `fs.renameSync`, guaranteeing no partial content even on crash.
 - **Per-path JSONC diffing** — `updateConfig()` deep-clones the parsed config, runs the updater callback, then `diffConfigs()` recursively compares original and draft. Each changed JSON path gets its own `jsonc-parser` `modify()` call, so comments and formatting on untouched keys are never disturbed.
 - **Webview security** — strict CSP with `default-src 'none'`, per-render nonces via `crypto.randomBytes(16)`, local resource roots restricted to `out/` only, and all DOM text insertion uses `.textContent` (never `innerHTML`).
@@ -350,6 +352,8 @@ Tests are written with Vitest. The suite covers the extension's main behaviors:
 | `smoke.test.ts` | End-to-end editor saves across stores, panel, tree, JSONC writes, profile transfer round-trips, and JSON editing |
 | `packageMenus.test.ts` | The 17-command contribution surface and contextual menu visibility |
 | `configStore.test.ts` | Config discovery, JSONC parsing, formatting-preserving updates, key removal, and file watching |
+| `routingConversion.test.ts` | Internal ↔ public routing conversion: `models` chains, main overrides, reasoning-style variants, precedence, and idempotency |
+| `routingBoundary.test.ts` | End-to-end routing dialect at the disk boundary: legacy profile activation, on-disk migration, inverse reads, snapshots, and JSON-editor saves |
 | `modelRouting.test.ts` | Ordered-card promotion, shared defaults, fallback inheritance and overrides, serialization, removal, and session-bound routing intent |
 | `modelCapabilities.test.ts` | Capability validation for effective inherited and overridden settings |
 | `webview.test.ts` | Model picker behavior, ordered-list editor integration, drag promotion, fallback editing, profile JSON editor UI, and persisted state |

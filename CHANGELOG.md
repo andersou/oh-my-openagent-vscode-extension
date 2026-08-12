@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Features
 
 - feat: selectable config scope (`global`, `opencode`, `senpi`, `codex`) — switch the active config scope from the Command Palette or the view title gear icon; the choice persists in `omo.profiles.json` under `configScope`, and only the `opencode` scope writes `agent_order`/`disabled_agents`.
+- fix: serialize profile routing to the unified public format — extension-only `main_overrides` stays in `omo.profiles.json`, while `omo.jsonc` receives ordered `models` entries and modern `reasoning`; existing profiles using `fallback_models` or reasoning-style `variant` remain readable and are normalized on activation.
 
 ## [1.0.0] - 2026-08-01
 
