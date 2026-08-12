@@ -6,11 +6,13 @@ import { ConfigStore } from './configStore.js';
 import type {
   AgentConfig,
   CategoryConfig,
+  ConfigScope,
   ImportProfilesResult,
   Profile,
   ProfilesFile,
   OmOConfig,
 } from './schema.js';
+import { CONFIG_SCOPES } from './schema.js';
 import type {
   NormalizedProfilesFile,
   ProfileFragment,
@@ -179,6 +181,7 @@ export class ProfileStore {
         profiles: Array.isArray(data.profiles) ? data.profiles : [],
         lastActiveProfile: data.lastActiveProfile,
         version: data.version ?? 1,
+        configScope: data.configScope,
       };
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -244,12 +247,18 @@ export class ProfileStore {
    */
   getProfilesFileSnapshot(): NormalizedProfilesFile {
     const data = this.readProfilesFile();
-    const snapshot: NormalizedProfilesFile & { lastActiveProfile?: string } = {
+    const snapshot: NormalizedProfilesFile & {
+      lastActiveProfile?: string;
+      configScope?: ConfigScope;
+    } = {
       version: 1,
       profiles: data.profiles,
     };
     if (data.lastActiveProfile !== undefined) {
       snapshot.lastActiveProfile = data.lastActiveProfile;
+    }
+    if (data.configScope !== undefined) {
+      snapshot.configScope = data.configScope;
     }
     return cloneProfilesFile(snapshot);
   }
@@ -671,6 +680,32 @@ export class ProfileStore {
    */
   getActiveProfileName(): string | undefined {
     return this.readProfilesFile().lastActiveProfile;
+  }
+
+  /**
+   * Return the persisted config scope if it is a valid {@link ConfigScope},
+   * otherwise `undefined`. Missing sidecar also returns `undefined`.
+   */
+  getConfigScope(): ConfigScope | undefined {
+    const scope = this.readProfilesFile().configScope;
+    if (CONFIG_SCOPES.includes(scope as ConfigScope)) {
+      return scope as ConfigScope;
+    }
+    return undefined;
+  }
+
+  /**
+   * Persist the requested config scope in the sidecar. Creates a new
+   * `{ version: 1, profiles: [] }` sidecar when none exists. Emits one
+   * `change` event when the stored value actually changes.
+   */
+  async setConfigScope(scope: ConfigScope): Promise<void> {
+    const data = this.readProfilesFile();
+    if (data.configScope === scope) {
+      return;
+    }
+    data.configScope = scope;
+    await this.writeProfilesFile(data);
   }
 
   /**

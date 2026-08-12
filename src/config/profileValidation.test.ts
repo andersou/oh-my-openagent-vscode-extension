@@ -523,4 +523,36 @@ describe('profile runtime validation', () => {
       },
     });
   });
+
+  it.each([
+    { label: 'valid configScope', configScope: 'opencode' },
+    { label: 'invalid configScope', configScope: 'unknown' },
+    { label: 'non-string configScope', configScope: 42 },
+  ])('accepts but ignores imported $label on a full sidecar', ({ configScope }) => {
+    // Given
+    const input = { version: 1, profiles: [], configScope };
+
+    // When
+    const result = validateProfilesFile(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { version: 1, profiles: [] },
+    });
+  });
+
+  it('accepts a missing configScope on a full sidecar', () => {
+    // Given
+    const input = { version: 1, profiles: [] };
+
+    // When
+    const result = validateProfilesFile(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { version: 1, profiles: [] },
+    });
+  });
 });

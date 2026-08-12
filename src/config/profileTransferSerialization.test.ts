@@ -154,6 +154,20 @@ describe('profile transfer serialization', () => {
     });
   });
 
+  it('preserves configScope through sidecar clone and serialization', () => {
+    const sidecar = {
+      version: 1 as const,
+      profiles: [{ name: 'Scoped', agents: { sisyphus: { model: 'm' } } }],
+      configScope: 'opencode' as const,
+      lastActiveProfile: 'Scoped',
+    };
+
+    const clone = cloneProfilesFile(sidecar);
+
+    expect(clone.configScope).toBe('opencode');
+    expect(serializeProfileTransfer(clone)).toContain('"configScope": "opencode"');
+  });
+
   it.each([
     { sourceName: 'Focus.profile.jsonc', expected: 'Focus' },
     { sourceName: 'Focus.PROFILE.JSON', expected: 'Focus' },
