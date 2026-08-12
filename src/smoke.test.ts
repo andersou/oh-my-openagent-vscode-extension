@@ -863,3 +863,259 @@ describe('smoke: end-to-end editor flow', () => {
   });
 
 });
+
+describe('smoke: per-scope end-to-end writes', () => {
+  let tmpDir: string;
+  let configPath: string;
+  let extensionPath: string;
+
+  const SCOPED_CONFIG = `{
+  // shared base comment
+  "categories": {
+    "deep": { "model": "shared/deep" }, // deep comment
+  },
+  // opencode block comment
+  "[opencode]": {
+    // opencode agents comment
+    "agents": {
+      "sisyphus": { "model": "opencode/sisyphus" }, // opencode sisyphus comment
+    },
+  },
+  // senpi block comment
+  "[senpi]": {
+    // senpi agents comment
+    "agents": {
+      "sisyphus": { "model": "senpi/sisyphus" }, // senpi sisyphus comment
+    },
+  },
+}
+`;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-scope-'));
+    configPath = path.join(tmpDir, 'omo.jsonc');
+    fs.writeFileSync(configPath, SCOPED_CONFIG, 'utf-8');
+
+    extensionPath = fs.mkdtempSync(path.join(os.tmpdir(), 'omo-scope-ext-'));
+    fs.mkdirSync(path.join(extensionPath, 'out'), { recursive: true });
+    fs.mkdirSync(path.join(extensionPath, 'src', 'ui', 'webview'), { recursive: true });
+    fs.writeFileSync(path.join(extensionPath, 'src', 'ui', 'webview', 'webview.html'), '<html><body><div id="app"></div></body></html>');
+    fs.writeFileSync(path.join(extensionPath, 'src', 'ui', 'webview', 'webview.css'), '');
+
+    AgentEditorPanel.currentPanel = undefined;
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(extensionPath, { recursive: true, force: true });
+  });
+
+  async function openAgentEditorAndSave(
+    configStore: ConfigStore,
+    profileStore: ProfileStore,
+    model: string,
+  ): Promise<void> {
+    const modelDiscovery = new ModelDiscovery(stubExecutor([]) as never, extensionPath);
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const { panel, sendToWebview } = makeMockWebviewPanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    sendToWebview('ready');
+    await new Promise((r) => setTimeout(r, 30));
+
+    sendToWebview('save', {
+      target: { type: 'agent', name: 'sisyphus', profile: null },
+      payload: { model },
+    });
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
+  async function openCategoryEditorAndSave(
+    configStore: ConfigStore,
+    profileStore: ProfileStore,
+    model: string,
+  ): Promise<void> {
+    const modelDiscovery = new ModelDiscovery(stubExecutor([]) as never, extensionPath);
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const { panel, sendToWebview } = makeMockWebviewPanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'category', name: 'deep' },
+    );
+
+    sendToWebview('ready');
+    await new Promise((r) => setTimeout(r, 30));
+
+    sendToWebview('save', {
+      target: { type: 'category', name: 'deep', profile: null },
+      payload: { model },
+    });
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
+  it('default opencode scope writes agent under [opencode] and preserves comments/trailing commas', async () => {
+    const configStore = new ConfigStore(tmpDir);
+    const profileStore = new ProfileStore(configStore);
+
+    await openAgentEditorAndSave(configStore, profileStore, 'opencode/new');
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const opencodeStart = raw.indexOf('"[opencode]"');
+    const senpiStart = raw.indexOf('"[senpi]"');
+    const newValuePos = raw.indexOf('"opencode/new"');
+
+    expect(newValuePos).toBeGreaterThan(opencodeStart);
+    expect(newValuePos).toBeLessThan(senpiStart);
+    expect(raw).toContain('// opencode agents comment');
+    expect(raw).toContain('// opencode sisyphus comment');
+    expect(raw).toContain('// senpi agents comment');
+    expect(raw).toContain('// senpi sisyphus comment');
+    expect(raw).toContain('// shared base comment');
+    expect(raw).toContain('// deep comment');
+    expect(raw).not.toContain('configScope');
+    expect(configStore.getAgent('sisyphus')?.model).toBe('opencode/new');
+
+    configStore.dispose();
+  });
+
+  it('senpi scope writes agent under [senpi] and preserves [opencode]', async () => {
+    const configStore = new ConfigStore(tmpDir);
+    const profileStore = new ProfileStore(configStore);
+    configStore.setScope('senpi');
+
+    await openAgentEditorAndSave(configStore, profileStore, 'senpi/new');
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const senpiStart = raw.indexOf('"[senpi]"');
+    const newValuePos = raw.indexOf('"senpi/new"');
+
+    expect(newValuePos).toBeGreaterThan(senpiStart);
+    expect(raw).toContain('"opencode/sisyphus"');
+    expect(raw).toContain('// opencode agents comment');
+    expect(raw).toContain('// opencode sisyphus comment');
+    expect(raw).toContain('// senpi agents comment');
+    expect(raw).toContain('// senpi sisyphus comment');
+    expect(raw).toContain('// shared base comment');
+    expect(raw).toContain('// deep comment');
+    expect(raw).not.toContain('configScope');
+    expect(configStore.getAgent('sisyphus')?.model).toBe('senpi/new');
+
+    configStore.dispose();
+  });
+
+  it('global scope writes category at root and preserves existing blocks', async () => {
+    const configStore = new ConfigStore(tmpDir);
+    const profileStore = new ProfileStore(configStore);
+    configStore.setScope('global');
+
+    await openCategoryEditorAndSave(configStore, profileStore, 'global/deep-new');
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const categoriesStart = raw.indexOf('"categories"');
+    const opencodeStart = raw.indexOf('"[opencode]"');
+    const newValuePos = raw.indexOf('"global/deep-new"');
+
+    expect(newValuePos).toBeGreaterThan(categoriesStart);
+    expect(newValuePos).toBeLessThan(opencodeStart);
+    expect(raw).toContain('"opencode/sisyphus"');
+    expect(raw).toContain('"senpi/sisyphus"');
+    expect(raw).toContain('// opencode agents comment');
+    expect(raw).toContain('// senpi agents comment');
+    expect(raw).toContain('// shared base comment');
+    expect(raw).toContain('// deep comment');
+    expect(raw).not.toContain('configScope');
+    expect(configStore.getCategory('deep')?.model).toBe('global/deep-new');
+
+    configStore.dispose();
+  });
+
+  it('configScope lives in sidecar and never leaks into omo.jsonc', async () => {
+    const configStore = new ConfigStore(tmpDir);
+    const profileStore = new ProfileStore(configStore);
+
+    await profileStore.setConfigScope('codex');
+    configStore.setScope('codex');
+
+    await configStore.updateConfig((draft) => {
+      draft.agents = { sisyphus: { model: 'codex/sisyphus' } };
+      draft.categories = { deep: { model: 'codex/deep' } };
+    });
+    await profileStore.createProfile('codex-profile');
+    await profileStore.activateProfile('codex-profile');
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const codexStart = raw.indexOf('"[codex]"');
+    const sisyphusPos = raw.indexOf('"codex/sisyphus"');
+    const deepPos = raw.indexOf('"codex/deep"');
+
+    expect(codexStart).toBeGreaterThan(-1);
+    expect(sisyphusPos).toBeGreaterThan(codexStart);
+    expect(deepPos).toBeGreaterThan(codexStart);
+    expect(raw).not.toContain('configScope');
+
+    const sidecar = readSidecar(tmpDir);
+    expect(sidecar.configScope).toBe('codex');
+    expect(sidecar.profiles).toHaveLength(1);
+    expect(sidecar.profiles[0]?.agents?.sisyphus?.model).toBe('codex/sisyphus');
+
+    configStore.dispose();
+  });
+
+  it('allows agent_order/disabled_agents only under opencode scope', async () => {
+    const configStore = new ConfigStore(tmpDir);
+
+    await configStore.updateConfig((draft) => {
+      draft.agent_order = ['sisyphus'];
+      draft.disabled_agents = ['explore'];
+    });
+
+    let raw = fs.readFileSync(configPath, 'utf-8');
+    const opencodeStart = raw.indexOf('"[opencode]"');
+    const senpiStart = raw.indexOf('"[senpi]"');
+    const agentOrderPos = raw.indexOf('"agent_order"');
+    const disabledAgentsPos = raw.indexOf('"disabled_agents"');
+
+    expect(agentOrderPos).toBeGreaterThan(opencodeStart);
+    expect(agentOrderPos).toBeLessThan(senpiStart);
+    expect(disabledAgentsPos).toBeGreaterThan(opencodeStart);
+    expect(disabledAgentsPos).toBeLessThan(senpiStart);
+
+    configStore.setScope('senpi');
+    await configStore.updateConfig((draft) => {
+      draft.agent_order = ['sisyphus'];
+      draft.disabled_agents = ['explore'];
+    });
+    raw = fs.readFileSync(configPath, 'utf-8');
+    expect(raw.match(/"agent_order"/g)?.length).toBe(1);
+    expect(raw.match(/"disabled_agents"/g)?.length).toBe(1);
+
+    configStore.setScope('global');
+    await configStore.updateConfig((draft) => {
+      draft.agent_order = ['sisyphus'];
+      draft.disabled_agents = ['explore'];
+    });
+    raw = fs.readFileSync(configPath, 'utf-8');
+    expect(raw.match(/"agent_order"/g)?.length).toBe(1);
+    expect(raw.match(/"disabled_agents"/g)?.length).toBe(1);
+    expect(raw).not.toContain('configScope');
+
+    configStore.dispose();
+  });
+});
