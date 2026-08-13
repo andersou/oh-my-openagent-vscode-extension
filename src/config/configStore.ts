@@ -30,10 +30,21 @@ import {
 // ---------------------------------------------------------------------------
 const CANDIDATE_FILES = ['omo.jsonc', 'omo.json'] as const;
 
-/** Top-level harness-block keys in a unified omo config file. */
-const HARNESS_KEYS = new Set(
-  CONFIG_SCOPES.filter((s) => s !== 'global').map((s) => `[${s}]`),
+/** Every scope that lives in its own `[<scope>]` block, in declaration order. */
+const HARNESS_SCOPES = CONFIG_SCOPES.filter(
+  (scope): scope is Exclude<ConfigScope, 'global'> => scope !== 'global',
 );
+
+/** Top-level harness-block keys in a unified omo config file. */
+const HARNESS_KEYS = new Set(HARNESS_SCOPES.map((scope) => `[${scope}]`));
+
+/** Formatting applied to every jsonc-parser edit this store makes. */
+const FORMATTING_OPTIONS = {
+  tabSize: 2,
+  insertSpaces: true,
+  eol: '\n',
+  insertFinalNewline: true,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -464,13 +475,6 @@ export class ConfigStore {
       return; // nothing changed
     }
 
-    // Ensure base directory exists (first write scenario)
-    const configPath = this.getConfigPath();
-    const dir = path.dirname(configPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
     // Apply edits sequentially — each modify generates edits relative to
     // the current text, and applyEdits produces the new base for the next.
     // Paths are prefixed with the scope's write prefix: [] for global,
@@ -485,18 +489,30 @@ export class ConfigStore {
     }
     for (const [jsonPath, value] of patches) {
       const edits: EditResult = modify(text, [...prefix, ...jsonPath], value, {
-        formattingOptions: {
-          tabSize: 2,
-          insertSpaces: true,
-          eol: '\n',
-          insertFinalNewline: true,
-        },
+        formattingOptions: FORMATTING_OPTIONS,
       });
       text = applyEdits(text, edits);
     }
 
-    // Write atomically via temp + rename — suppress watch to avoid
-    // self-triggered change events.
+    this.writeConfigFile(text);
+    // Update cache with the round-tripped view, so it matches a fresh read
+    this.cachedConfig = toInternalRoutingConfig(publicDraft);
+    this._emitter.emit('change');
+  }
+
+  /**
+   * Create the base directory if needed and atomically replace the user
+   * config file with `text` via temp + rename, suppressing the watch so the
+   * self-triggered change event is ignored. Updates `cachedRaw` only — the
+   * caller decides what the parsed cache becomes.
+   */
+  private writeConfigFile(text: string): void {
+    const configPath = this.getConfigPath();
+    const dir = path.dirname(configPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
     const tmpPath = `${configPath}.${process.pid}.tmp`;
     fs.writeFileSync(tmpPath, text, 'utf-8');
     this.suppressWatch = true;
@@ -510,10 +526,7 @@ export class ConfigStore {
       }, 200);
     }
 
-    // Update cache with the round-tripped view, so it matches a fresh read
     this.cachedRaw = text;
-    this.cachedConfig = toInternalRoutingConfig(publicDraft);
-    this._emitter.emit('change');
   }
 
   /**
@@ -560,6 +573,96 @@ export class ConfigStore {
       }
     }
     return patches;
+  }
+
+  // ---- Scope reconciliation ----
+
+  /** Parse the user config file, refreshing the cache when it is cold. */
+  private readUserDocument(): Record<string, unknown> {
+    if (this.cachedRaw === null) {
+      this.refresh();
+    }
+    return this.parseJson(this.cachedRaw ?? '', this.getConfigPath());
+  }
+
+  /** Persist raw text, drop the parsed cache, and notify subscribers. */
+  private commitRaw(text: string): void {
+    this.writeConfigFile(text);
+    this.cachedConfig = null;
+    this._emitter.emit('change');
+  }
+
+  /**
+   * Return the harness scopes whose block defines a key the `global` scope
+   * also owns. Those blocks win over the shared base, so while one exists a
+   * `global` edit never reaches the harness it shadows.
+   */
+  getShadowingHarnessScopes(): ConfigScope[] {
+    const document = this.readUserDocument();
+    const globalKeys = omoConfigKeysForScope('global');
+    return HARNESS_SCOPES.filter((scope) => {
+      const block = document[`[${scope}]`];
+      return (
+        isPlainObject(block) && globalKeys.some((key) => block[key] !== undefined)
+      );
+    });
+  }
+
+  /**
+   * Delete every harness block, leaving the shared base as the only source of
+   * overrides. Comments and formatting on the surviving keys are preserved.
+   */
+  async removeHarnessBlocks(): Promise<void> {
+    const document = this.readUserDocument();
+    const present = HARNESS_SCOPES.filter(
+      (scope) => document[`[${scope}]`] !== undefined,
+    );
+    if (present.length === 0) {
+      return;
+    }
+
+    let text = this.cachedRaw ?? '';
+    for (const scope of present) {
+      text = applyEdits(
+        text,
+        modify(text, [`[${scope}]`], undefined, {
+          formattingOptions: FORMATTING_OPTIONS,
+        }),
+      );
+    }
+    this.commitRaw(text);
+  }
+
+  /**
+   * Copy the shared base's `agents` and `categories` into every harness block
+   * so each harness resolves to the values the `global` scope holds. Keys the
+   * base does not define are left alone, and harness-only keys such as
+   * `agent_order` survive.
+   */
+  async copyBaseToHarnessBlocks(): Promise<void> {
+    const document = this.readUserDocument();
+    const base = toPublicRoutingConfig(
+      toInternalRoutingConfig(pickOmOConfig(document, 'global')),
+    );
+    const keys = omoConfigKeysForScope('global').filter(
+      (key) => base[key] !== undefined,
+    );
+    if (keys.length === 0) {
+      return;
+    }
+
+    let text = this.cachedRaw ?? '';
+    for (const scope of HARNESS_SCOPES) {
+      for (const key of keys) {
+        text = applyEdits(
+          text,
+          modify(text, [`[${scope}]`, key], base[key], {
+            formattingOptions: FORMATTING_OPTIONS,
+          }),
+        );
+      }
+    }
+    this.commitRaw(text);
   }
 
   // ---- File watching ----

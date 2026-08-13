@@ -845,4 +845,137 @@ describe('ConfigStore', () => {
       expect(changes).toBe(0);
     });
   });
+
+  describe('global scope reconciliation', () => {
+    const SHADOWING_CONFIG = `{
+  // header
+  "agents": {
+    "sisyphus": { "model": "base/model" },
+  },
+  "categories": {
+    "quick": { "model": "base/quick" },
+  },
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "opencode/model" },
+    },
+    "agent_order": ["sisyphus"],
+  },
+  "[senpi]": {
+    "categories": {
+      "quick": { "model": "senpi/quick" },
+    },
+  },
+}
+`;
+
+    it('reports the harness blocks that shadow the shared base', () => {
+      writeConfig(SHADOWING_CONFIG);
+      store = new ConfigStore(tmpDir, undefined, 'opencode');
+      expect(store.getShadowingHarnessScopes()).toEqual(['opencode', 'senpi']);
+    });
+
+    it('ignores harness blocks that define no base-owned keys', () => {
+      writeConfig(`{
+  "agents": { "sisyphus": { "model": "base/model" } },
+  "[opencode]": { "agent_order": ["sisyphus"] },
+  "[codex]": {}
+}
+`);
+      store = new ConfigStore(tmpDir, undefined, 'opencode');
+      expect(store.getShadowingHarnessScopes()).toEqual([]);
+    });
+
+    it('removeHarnessBlocks drops every harness block and keeps the base', async () => {
+      writeConfig(SHADOWING_CONFIG);
+      store = new ConfigStore(tmpDir, undefined, 'global');
+
+      await store.removeHarnessBlocks();
+
+      const raw = readConfig();
+      expect(raw).toContain('// header');
+      const parsed = JSON.parse(
+        raw.replace(/\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1'),
+      );
+      expect(parsed['[opencode]']).toBeUndefined();
+      expect(parsed['[senpi]']).toBeUndefined();
+      expect(parsed.agents.sisyphus.model).toBe('base/model');
+      expect(parsed.categories.quick.model).toBe('base/quick');
+      expect(store.getShadowingHarnessScopes()).toEqual([]);
+    });
+
+    it('copyBaseToHarnessBlocks makes every harness scope resolve to the base', async () => {
+      writeConfig(SHADOWING_CONFIG);
+      store = new ConfigStore(tmpDir, undefined, 'global');
+
+      await store.copyBaseToHarnessBlocks();
+
+      const raw = readConfig();
+      expect(raw).toContain('// header');
+      for (const scope of ['opencode', 'senpi', 'codex'] as const) {
+        const scoped = new ConfigStore(tmpDir, undefined, scope);
+        expect(scoped.getAgent('sisyphus')?.model).toBe('base/model');
+        expect(scoped.getCategory('quick')?.model).toBe('base/quick');
+        scoped.dispose();
+      }
+      const parsed = JSON.parse(
+        raw.replace(/\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1'),
+      );
+      expect(parsed.agents.sisyphus.model).toBe('base/model');
+      expect(parsed['[opencode]'].agent_order).toEqual(['sisyphus']);
+    });
+
+    it('emits a single change event after reconciling', async () => {
+      writeConfig(SHADOWING_CONFIG);
+      store = new ConfigStore(tmpDir, undefined, 'global');
+      store.getConfig();
+
+      let changes = 0;
+      store.onDidChange.on('change', () => {
+        changes++;
+      });
+
+      await store.removeHarnessBlocks();
+
+      expect(changes).toBe(1);
+    });
+
+    it('removeHarnessBlocks is a no-op when no harness block exists', async () => {
+      writeConfig(`{
+  "agents": { "sisyphus": { "model": "base/model" } }
+}
+`);
+      store = new ConfigStore(tmpDir, undefined, 'global');
+      const before = readConfig();
+
+      let changes = 0;
+      store.onDidChange.on('change', () => {
+        changes++;
+      });
+
+      await store.removeHarnessBlocks();
+
+      expect(readConfig()).toBe(before);
+      expect(changes).toBe(0);
+    });
+
+    it('copyBaseToHarnessBlocks is a no-op when the shared base is empty', async () => {
+      writeConfig(`{
+  "[opencode]": { "agents": { "sisyphus": { "model": "opencode/model" } } }
+}
+`);
+      store = new ConfigStore(tmpDir, undefined, 'global');
+      const before = readConfig();
+
+      let changes = 0;
+      store.onDidChange.on('change', () => {
+        changes++;
+      });
+
+      await store.copyBaseToHarnessBlocks();
+
+      expect(readConfig()).toBe(before);
+      expect(changes).toBe(0);
+    });
+  });
 });
