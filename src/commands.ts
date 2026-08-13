@@ -404,7 +404,7 @@ async function reconcileForGlobalScope(
 
   const blocks = shadowing.map((scope) => `[${scope}]`).join(', ');
   const choice = await vscode.window.showWarningMessage(
-    `Harness blocks take precedence over the shared base: ${blocks}. Edits made in the "global" scope would have no effect there. Choose how to update omo.jsonc.`,
+    `Harness blocks take precedence over the shared base: ${blocks}. Edits made in the "global" scope would have no effect there. Removing deletes every harness block; copying replaces each block's agents and categories with the shared base's.`,
     { modal: true },
     REMOVE_HARNESS_BLOCKS,
     COPY_BASE_TO_HARNESS_BLOCKS,
