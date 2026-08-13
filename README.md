@@ -51,7 +51,7 @@ Switch scopes with the `Oh My OpenAgent: Select Config Scope` command. It is ava
 Harness blocks take precedence over the shared base, so while `[opencode]`, `[senpi]`, or `[codex]` defines `agents` or `categories`, nothing written to the base can reach that harness. When you pick `global` and such a block exists, the command asks how to update `omo.jsonc` before switching:
 
 - **Remove Harness Blocks** — delete every `[<harness>]` block, leaving the shared base as the only source of overrides. This is the durable choice: later `global` edits keep applying everywhere.
-- **Copy Global to All Harnesses** — write the base's `agents` and `categories` into every harness block so all of them resolve to the same values. Harness-only keys such as `agent_order` are kept. This reconciles the file once; a later `global` edit is shadowed again.
+- **Copy Global to All Harnesses** — make every harness block's `agents` and `categories` match the shared base: a key the base defines replaces the harness copy, and a key it leaves undefined is dropped from the block so it cannot shadow a value you add later. Harness-only keys such as `agent_order` are kept. This reconciles the file once; a later `global` edit to a key the blocks now define is shadowed again.
 
 Both rewrites preserve comments and formatting. Cancelling the prompt leaves the scope and `omo.jsonc` untouched. Switching to a harness scope never rewrites the file, because that block already wins on read.
 

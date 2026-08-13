@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
-- **Selecting the `global` scope now reconciles `omo.jsonc`** — harness blocks take precedence over the shared base, so a `[opencode]`, `[senpi]`, or `[codex]` block that defines `agents` or `categories` silently swallowed every edit made in the `global` scope. Switching to `global` now detects those blocks and asks how to update the file: **Remove Harness Blocks** deletes them so the base is the only source of overrides, or **Copy Global to All Harnesses** mirrors the base's `agents`/`categories` into every block (harness-only keys such as `agent_order` are kept). Cancelling leaves both the scope and the file untouched, and switching to a harness scope never rewrites the file. Both rewrites reuse the JSONC-preserving edit path.
+- **Selecting the `global` scope now reconciles `omo.jsonc`** — harness blocks take precedence over the shared base, so a `[opencode]`, `[senpi]`, or `[codex]` block that defines `agents` or `categories` silently swallowed every edit made in the `global` scope. Switching to `global` now detects those blocks and asks how to update the file: **Remove Harness Blocks** deletes them so the base is the only source of overrides, or **Copy Global to All Harnesses** makes every block's `agents`/`categories` match the base — a key the base defines replaces the harness copy, a key it omits is dropped so it cannot shadow a later global value (harness-only keys such as `agent_order` are kept). Cancelling leaves both the scope and the file untouched, and switching to a harness scope never rewrites the file. Both rewrites reuse the JSONC-preserving edit path.
 
 ## [1.1.0-beta.1] - 2026-08-12
 
