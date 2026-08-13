@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Bug Fixes
+
+- **Selecting the `global` scope now reconciles `omo.jsonc`** — harness blocks take precedence over the shared base, so a `[opencode]`, `[senpi]`, or `[codex]` block that defines `agents` or `categories` silently swallowed every edit made in the `global` scope. Switching to `global` now detects those blocks and asks how to update the file: **Remove Harness Blocks** deletes them so the base is the only source of overrides, or **Copy Global to All Harnesses** mirrors the base's `agents`/`categories` into every block (harness-only keys such as `agent_order` are kept). Cancelling leaves both the scope and the file untouched, and switching to a harness scope never rewrites the file. Both rewrites reuse the JSONC-preserving edit path.
+
 ## [1.1.0-beta.1] - 2026-08-12
 
 This pre-release adds selectable config scope and migrates profile model routing to the unified `models` serialization accepted by the upstream `dev` schema (`oh-my-openagent@5.0.0-beta.7`).

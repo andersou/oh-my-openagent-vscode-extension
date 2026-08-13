@@ -22,7 +22,7 @@ The sidebar view shows your active config, all built-in agents and categories wi
 - **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`omo.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
 - **Profile import and export** — move individual profiles or your whole sidecar in and out as JSON or JSONC. Import a single `{ agents, categories }` fragment, or import a full `{ version: 1, profiles: [...] }` sidecar and choose whether to extend the existing list or replace it. Export one profile or every profile at once.
 - **JSON profile editing** — open a saved profile or the active config's `agents`/`categories` as JSON in an untitled editor, edit freely, and save to apply. Useful for bulk changes that the form editor does not expose.
-- **Selectable config scope** — choose whether the extension edits the shared base (`global`) or a harness block (`opencode`, `senpi`, `codex`) of `omo.jsonc`. The active scope is shown next to the config file in the sidebar, and switching scopes closes any open agent editor to prevent stale edits.
+- **Selectable config scope** — choose whether the extension edits the shared base (`global`) or a harness block (`opencode`, `senpi`, `codex`) of `omo.jsonc`. The active scope is shown next to the config file in the sidebar, and switching scopes closes any open agent editor to prevent stale edits. Switching to `global` first reconciles `omo.jsonc`, because harness blocks would otherwise shadow every global edit.
 - **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away. Three collapsible groups (Agents, Categories, Profiles) with inline edit buttons, context menu actions, and tooltips that show configured parameters on hover.
 - **Commands where they belong**: `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are available from the Command Palette and view title. Editing, override management, profile actions, and JSON editing appear only when their sidebar context applies.
 
@@ -45,6 +45,15 @@ The extension can edit different parts of the unified `omo.jsonc` config. Choose
 - **`codex`** — the `[codex]` harness block. Only `agents` and `categories` are written here.
 
 Switch scopes with the `Oh My OpenAgent: Select Config Scope` command. It is available from the Command Palette and from the gear icon in the Models view title. The command shows the four scopes, marks the current one, and updates the active scope on selection.
+
+### Switching to the global scope
+
+Harness blocks take precedence over the shared base, so while `[opencode]`, `[senpi]`, or `[codex]` defines `agents` or `categories`, nothing written to the base can reach that harness. When you pick `global` and such a block exists, the command asks how to update `omo.jsonc` before switching:
+
+- **Remove Harness Blocks** — delete every `[<harness>]` block, leaving the shared base as the only source of overrides. This is the durable choice: later `global` edits keep applying everywhere.
+- **Copy Global to All Harnesses** — write the base's `agents` and `categories` into every harness block so all of them resolve to the same values. Harness-only keys such as `agent_order` are kept. This reconciles the file once; a later `global` edit is shadowed again.
+
+Both rewrites preserve comments and formatting. Cancelling the prompt leaves the scope and `omo.jsonc` untouched. Switching to a harness scope never rewrites the file, because that block already wins on read.
 
 Your choice is persisted as a `configScope` field inside the `omo.profiles.json` sidecar file, next to the user config. It is **not** stored as a VS Code setting. On activation the extension restores the persisted scope, falling back to `opencode` when none is saved.
 
@@ -302,6 +311,7 @@ extension.ts  (activation orchestrator)
 - **Transfer canonical JSON** — export serializes only JSON-safe values (null, booleans, finite numbers, strings, dense arrays, and plain objects), sorts keys, and appends a trailing newline. This prevents accidental disclosure of getters, symbols, or cyclic structures.
 - **Profile JSON editor host** — `profileJsonEditorHost.ts` isolates the active/saved target protocol from the UI, while `ProfileJsonEditor.svelte` provides a focused textarea with save, dirty tracking, and error display.
 - **Scope-aware writes** — `ConfigStore` carries a `ConfigScope` value (`global`, `opencode`, `senpi`, or `codex`). Reads merge the shared base with the selected harness block; writes prefix each JSONC patch with the matching harness block or target the root for `global`. The active scope is saved to and restored from `omo.profiles.json` via `ProfileStore`, so the same scope is active across extension restarts without touching VS Code settings.
+- **Global-scope reconciliation** — because harness blocks outrank the shared base, selecting `global` while one of them defines `agents` or `categories` would make every global edit a no-op. `ConfigStore.getShadowingHarnessScopes()` detects that state and the command offers the two fixes, `removeHarnessBlocks()` or `copyBaseToHarnessBlocks()`, before the scope changes. Both go through the same JSONC-preserving edit path as ordinary writes.
 
 ### Built-in inventory
 
