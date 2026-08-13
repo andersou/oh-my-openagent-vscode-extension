@@ -959,9 +959,41 @@ describe('ConfigStore', () => {
       expect(changes).toBe(0);
     });
 
-    it('copyBaseToHarnessBlocks is a no-op when the shared base is empty', async () => {
+    it('copyBaseToHarnessBlocks clears harness keys the shared base does not define', async () => {
+      writeConfig(`{
+  "agents": { "sisyphus": { "model": "base/model" } },
+  "[senpi]": {
+    "categories": { "quick": { "model": "senpi/quick" } }
+  }
+}
+`);
+      store = new ConfigStore(tmpDir, undefined, 'global');
+
+      await store.copyBaseToHarnessBlocks();
+
+      const scoped = new ConfigStore(tmpDir, undefined, 'senpi');
+      expect(scoped.getAgent('sisyphus')?.model).toBe('base/model');
+      expect(scoped.getCategory('quick')).toBeUndefined();
+      scoped.dispose();
+    });
+
+    it('copyBaseToHarnessBlocks strips shadowing keys when the shared base is empty', async () => {
       writeConfig(`{
   "[opencode]": { "agents": { "sisyphus": { "model": "opencode/model" } } }
+}
+`);
+      store = new ConfigStore(tmpDir, undefined, 'global');
+
+      await store.copyBaseToHarnessBlocks();
+
+      const scoped = new ConfigStore(tmpDir, undefined, 'opencode');
+      expect(scoped.getAgent('sisyphus')).toBeUndefined();
+      scoped.dispose();
+    });
+
+    it('copyBaseToHarnessBlocks is a no-op when nothing shadows the shared base', async () => {
+      writeConfig(`{
+  "[opencode]": { "agent_order": ["sisyphus"] }
 }
 `);
       store = new ConfigStore(tmpDir, undefined, 'global');

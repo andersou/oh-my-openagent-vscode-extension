@@ -634,33 +634,42 @@ export class ConfigStore {
   }
 
   /**
-   * Copy the shared base's `agents` and `categories` into every harness block
-   * so each harness resolves to the values the `global` scope holds. Keys the
-   * base does not define are left alone, and harness-only keys such as
-   * `agent_order` survive.
+   * Make every harness block's `agents` and `categories` match the shared
+   * base, so no harness can shadow the `global` scope. A key the base defines
+   * replaces the harness copy wholesale; a key the base leaves undefined is
+   * deleted from the harness block, because it would otherwise shadow a value
+   * `global` adds later. Harness-only keys such as `agent_order` survive.
    */
   async copyBaseToHarnessBlocks(): Promise<void> {
     const document = this.readUserDocument();
     const base = toPublicRoutingConfig(
       toInternalRoutingConfig(pickOmOConfig(document, 'global')),
     );
-    const keys = omoConfigKeysForScope('global').filter(
-      (key) => base[key] !== undefined,
-    );
-    if (keys.length === 0) {
+
+    const patches: Array<[JSONPath, unknown]> = [];
+    for (const scope of HARNESS_SCOPES) {
+      const blockKey = `[${scope}]`;
+      const block = document[blockKey];
+      for (const key of omoConfigKeysForScope('global')) {
+        if (base[key] !== undefined) {
+          patches.push([[blockKey, key], base[key]]);
+        } else if (isPlainObject(block) && block[key] !== undefined) {
+          patches.push([[blockKey, key], undefined]);
+        }
+      }
+    }
+    if (patches.length === 0) {
       return;
     }
 
     let text = this.cachedRaw ?? '';
-    for (const scope of HARNESS_SCOPES) {
-      for (const key of keys) {
-        text = applyEdits(
-          text,
-          modify(text, [`[${scope}]`, key], base[key], {
-            formattingOptions: FORMATTING_OPTIONS,
-          }),
-        );
-      }
+    for (const [jsonPath, value] of patches) {
+      text = applyEdits(
+        text,
+        modify(text, jsonPath, value, {
+          formattingOptions: FORMATTING_OPTIONS,
+        }),
+      );
     }
     this.commitRaw(text);
   }
