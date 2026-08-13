@@ -46,6 +46,9 @@ vi.mock('./ui/agentEditorPanel.js', () => ({
 type FakeConfigStore = {
   getScope: ReturnType<typeof vi.fn>;
   setScope: ReturnType<typeof vi.fn>;
+  getShadowingHarnessScopes: ReturnType<typeof vi.fn>;
+  removeHarnessBlocks: ReturnType<typeof vi.fn>;
+  copyBaseToHarnessBlocks: ReturnType<typeof vi.fn>;
   refreshFromDisk: ReturnType<typeof vi.fn>;
   onDidChange: { on: ReturnType<typeof vi.fn>; emit: ReturnType<typeof vi.fn> };
 };
@@ -89,6 +92,9 @@ function createDependencies(): Dependencies {
     configStore: {
       getScope: vi.fn(() => 'opencode'),
       setScope: vi.fn(),
+      getShadowingHarnessScopes: vi.fn(() => []),
+      removeHarnessBlocks: vi.fn(),
+      copyBaseToHarnessBlocks: vi.fn(),
       refreshFromDisk: vi.fn(),
       onDidChange: { on: vi.fn(), emit: vi.fn() },
     },
@@ -275,5 +281,117 @@ describe('selectConfigScope', () => {
     expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
     expect(deps.configStore.setScope).not.toHaveBeenCalled();
     expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  function mockModalChoice(choice: string | undefined): void {
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+      choice as never,
+    );
+  }
+
+  it('removes the shadowing harness blocks before switching to global', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getShadowingHarnessScopes.mockReturnValue([
+      'opencode',
+      'senpi',
+    ]);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
+      label: 'global',
+    });
+    mockModalChoice('Remove Harness Blocks');
+
+    await handler();
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('[opencode], [senpi]'),
+      { modal: true },
+      'Remove Harness Blocks',
+      'Copy Global to All Harnesses',
+    );
+    expect(deps.configStore.removeHarnessBlocks).toHaveBeenCalledTimes(1);
+    expect(deps.configStore.copyBaseToHarnessBlocks).not.toHaveBeenCalled();
+    expect(deps.profileStore.setConfigScope).toHaveBeenCalledWith('global');
+    expect(deps.configStore.setScope).toHaveBeenCalledWith('global');
+  });
+
+  it('copies the shared base into every harness block when asked', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
+      label: 'global',
+    });
+    mockModalChoice('Copy Global to All Harnesses');
+
+    await handler();
+
+    expect(deps.configStore.copyBaseToHarnessBlocks).toHaveBeenCalledTimes(1);
+    expect(deps.configStore.removeHarnessBlocks).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).toHaveBeenCalledWith('global');
+  });
+
+  it('keeps the current scope when the reconciliation prompt is cancelled', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
+      label: 'global',
+    });
+    mockModalChoice(undefined);
+
+    await handler();
+
+    expect(deps.configStore.removeHarnessBlocks).not.toHaveBeenCalled();
+    expect(deps.configStore.copyBaseToHarnessBlocks).not.toHaveBeenCalled();
+    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not prompt when no harness block shadows the shared base', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getShadowingHarnessScopes.mockReturnValue([]);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
+      label: 'global',
+    });
+
+    await handler();
+
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(deps.configStore.removeHarnessBlocks).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).toHaveBeenCalledWith('global');
+  });
+
+  it('never reconciles omo.jsonc when switching to a harness scope', async () => {
+    deps.configStore.getScope.mockReturnValue('global');
+    deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
+      label: 'senpi',
+    });
+
+    await handler();
+
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(deps.configStore.removeHarnessBlocks).not.toHaveBeenCalled();
+    expect(deps.configStore.copyBaseToHarnessBlocks).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).toHaveBeenCalledWith('senpi');
+  });
+
+  it('reports a reconciliation failure and leaves the scope unchanged', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
+      label: 'global',
+    });
+    mockModalChoice('Remove Harness Blocks');
+    deps.configStore.removeHarnessBlocks.mockRejectedValue(
+      new Error('disk full'),
+    );
+
+    await handler();
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'Failed to update omo.jsonc for the global scope: disk full',
+    );
+    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).not.toHaveBeenCalled();
   });
 });

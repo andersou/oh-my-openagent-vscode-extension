@@ -35,6 +35,9 @@ import {
   registerProfileTransferCommands,
 } from './profileTransferCommands.js';
 
+const REMOVE_HARNESS_BLOCKS = 'Remove Harness Blocks';
+const COPY_BASE_TO_HARNESS_BLOCKS = 'Copy Global to All Harnesses';
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -133,6 +136,12 @@ export function registerCommands(
         }
         const scope = picked.label as ConfigScope;
         if (scope === currentScope) {
+          return;
+        }
+        if (
+          scope === 'global' &&
+          !(await reconcileForGlobalScope(configStore))
+        ) {
           return;
         }
         try {
@@ -377,4 +386,42 @@ function isProfileItem(
 function reportError(prefix: string, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   void vscode.window.showErrorMessage(`${prefix}: ${message}`);
+}
+
+/**
+ * Bring `omo.jsonc` in line with a switch to the `global` scope and report
+ * whether the switch may continue. Harness blocks win over the shared base,
+ * so any block that defines `agents` or `categories` would swallow every
+ * global edit; the user picks which of the two fixes to apply.
+ */
+async function reconcileForGlobalScope(
+  configStore: ConfigStore,
+): Promise<boolean> {
+  const shadowing = configStore.getShadowingHarnessScopes();
+  if (shadowing.length === 0) {
+    return true;
+  }
+
+  const blocks = shadowing.map((scope) => `[${scope}]`).join(', ');
+  const choice = await vscode.window.showWarningMessage(
+    `Harness blocks take precedence over the shared base: ${blocks}. Edits made in the "global" scope would have no effect there. Choose how to update omo.jsonc.`,
+    { modal: true },
+    REMOVE_HARNESS_BLOCKS,
+    COPY_BASE_TO_HARNESS_BLOCKS,
+  );
+  if (choice === undefined) {
+    return false;
+  }
+
+  try {
+    if (choice === REMOVE_HARNESS_BLOCKS) {
+      await configStore.removeHarnessBlocks();
+    } else {
+      await configStore.copyBaseToHarnessBlocks();
+    }
+  } catch (err) {
+    reportError('Failed to update omo.jsonc for the global scope', err);
+    return false;
+  }
+  return true;
 }
