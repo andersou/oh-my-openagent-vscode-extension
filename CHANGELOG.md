@@ -5,11 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0-beta.2] - 2026-08-12
+
+This pre-release fixes the `global` config scope, which silently discarded every edit while a harness block defined `agents` or `categories`.
 
 ### Bug Fixes
 
 - **Selecting the `global` scope now reconciles `omo.jsonc`** — harness blocks take precedence over the shared base, so a `[opencode]`, `[senpi]`, or `[codex]` block that defines `agents` or `categories` silently swallowed every edit made in the `global` scope. Switching to `global` now detects those blocks and asks how to update the file: **Remove Harness Blocks** deletes them so the base is the only source of overrides, or **Copy Global to All Harnesses** makes every block's `agents`/`categories` match the base — a key the base defines replaces the harness copy, a key it omits is dropped so it cannot shadow a later global value (harness-only keys such as `agent_order` are kept). Cancelling leaves both the scope and the file untouched, and switching to a harness scope never rewrites the file. Both rewrites reuse the JSONC-preserving edit path.
+
+### Tests
+
+- 631 tests pass (23 files), including 13 new cases covering shadow detection, both reconciliation paths, JSONC preservation, and the command's prompt, cancel, and failure flows.
 
 ## [1.1.0-beta.1] - 2026-08-12
 
@@ -225,6 +231,7 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[1.1.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0-beta.1...v1.1.0-beta.2
 [1.1.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.0.0...v1.1.0-beta.1
 [1.0.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.6.0-beta.1...v1.0.0
 [0.6.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0...v0.6.0-beta.1
