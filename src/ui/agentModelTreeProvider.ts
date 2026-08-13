@@ -321,6 +321,7 @@ export class AgentModelTreeProvider
     item.contextValue = 'configFile';
     item.iconPath = new vscode.ThemeIcon('file-code');
     item.tooltip = configPath;
+    item.description = this.configStore.getScope();
     return item;
   }
 

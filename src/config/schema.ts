@@ -90,11 +90,17 @@ export interface FallbackModelConfig {
   reasoningEffort?: ReasoningEffort;
   temperature?: number;
   top_p?: number;
+  max_tokens?: number;
+  provider_options?: Record<string, unknown>;
   maxTokens?: number;
+  providerOptions?: Record<string, unknown>;
+  textVerbosity?: TextVerbosity;
   thinking?: ThinkingConfig;
 }
 
 export type MainOverrides = Omit<FallbackModelConfig, 'model'>;
+
+export type PublicModelEntry = string | FallbackModelConfig;
 
 export type FallbackModels = string | Array<string | FallbackModelConfig>;
 export type ToolConfig = Record<string, boolean>;
@@ -112,6 +118,7 @@ export interface PermissionConfig {
 
 export interface AgentConfig {
   model?: string;
+  models?: PublicModelEntry[];
   variant?: string;
   fallback_models?: FallbackModels;
   main_overrides?: MainOverrides;
@@ -140,6 +147,7 @@ export interface AgentConfig {
 
 export interface CategoryConfig {
   model?: string;
+  models?: PublicModelEntry[];
   variant?: string;
   fallback_models?: FallbackModels;
   main_overrides?: MainOverrides;
@@ -165,6 +173,22 @@ export interface OmOConfig {
   disabled_agents?: string[];
 }
 
+export type ConfigScope = 'global' | 'opencode' | 'senpi' | 'codex';
+
+export const CONFIG_SCOPES = ['global', 'opencode', 'senpi', 'codex'] as const;
+
+export function writePrefixForScope(scope: ConfigScope): readonly string[] {
+  return scope === 'global' ? [] : [`[${scope}]`];
+}
+
+export function omoConfigKeysForScope(
+  scope: ConfigScope,
+): ReadonlyArray<keyof OmOConfig> {
+  return scope === 'opencode'
+    ? ['agents', 'categories', 'agent_order', 'disabled_agents']
+    : ['agents', 'categories'];
+}
+
 export interface Profile {
   name: string;
   description?: string;
@@ -184,4 +208,5 @@ export interface ProfilesFile {
   profiles: Profile[];
   lastActiveProfile?: string;
   version?: number;
+  configScope?: ConfigScope;
 }

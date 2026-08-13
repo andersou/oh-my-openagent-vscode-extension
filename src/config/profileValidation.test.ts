@@ -523,4 +523,109 @@ describe('profile runtime validation', () => {
       },
     });
   });
+
+  it.each([
+    { label: 'valid configScope', configScope: 'opencode' },
+    { label: 'invalid configScope', configScope: 'unknown' },
+    { label: 'non-string configScope', configScope: 42 },
+  ])('accepts but ignores imported $label on a full sidecar', ({ configScope }) => {
+    // Given
+    const input = { version: 1, profiles: [], configScope };
+
+    // When
+    const result = validateProfilesFile(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { version: 1, profiles: [] },
+    });
+  });
+
+  it('accepts a missing configScope on a full sidecar', () => {
+    // Given
+    const input = { version: 1, profiles: [] };
+
+    // When
+    const result = validateProfilesFile(input);
+
+    // Then
+    expect(result).toEqual({
+      ok: true,
+      value: { version: 1, profiles: [] },
+    });
+  });
+});
+
+describe('modern models routing validation', () => {
+  it('accepts a public models chain in agents and categories', () => {
+    // Given: a fragment taken from an omo.jsonc that uses the modern chain
+    const input = {
+      agents: {
+        sisyphus: {
+          models: [
+            'openai/gpt-5.4',
+            { model: 'anthropic/claude-4', reasoning: 'high', maxTokens: 8192 },
+          ],
+        },
+      },
+      categories: { deep: { models: ['openai/gpt-5.4'] } },
+    };
+
+    // When
+    const result = validateProfileFragment(input);
+
+    // Then
+    expect(result).toEqual({ ok: true, value: input });
+  });
+
+  it.each([
+    { label: 'agents', group: 'agents' },
+    { label: 'categories', group: 'categories' },
+  ])('rejects an unknown key inside a $label models entry', ({ group }) => {
+    // Given: a model entry carrying a key the upstream schema rejects
+    const entry = {
+      models: [{ model: 'a/one', main_overrides: { temperature: 0.2 } }],
+    };
+
+    // When
+    const result = validateProfileFragment({ [group]: { sisyphus: entry } });
+
+    // Then
+    expectFailure(result, 'unknown_field', [
+      group,
+      'sisyphus',
+      'models',
+      0,
+      'main_overrides',
+    ]);
+  });
+
+  it('rejects a models entry without a model', () => {
+    // Given: an object entry that names no model
+    const input = { agents: { sisyphus: { models: [{ temperature: 0.2 }] } } };
+
+    // When
+    const result = validateProfileFragment(input);
+
+    // Then
+    expectFailure(result, 'missing_field', [
+      'agents',
+      'sisyphus',
+      'models',
+      0,
+      'model',
+    ]);
+  });
+
+  it('rejects a models value that is not an array', () => {
+    // Given: the legacy scalar form, which `models` does not accept
+    const input = { agents: { sisyphus: { models: 'a/one' } } };
+
+    // When
+    const result = validateProfileFragment(input);
+
+    // Then
+    expectFailure(result, 'invalid_type', ['agents', 'sisyphus', 'models']);
+  });
 });

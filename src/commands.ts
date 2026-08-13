@@ -29,17 +29,21 @@ import type {
   AgentModelTreeProvider,
 } from './ui/agentModelTreeProvider.js';
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
+import { CONFIG_SCOPES, type ConfigScope } from './config/schema.js';
 import {
   createProfileTransferCommandContext,
   registerProfileTransferCommands,
 } from './profileTransferCommands.js';
+
+const REMOVE_HARNESS_BLOCKS = 'Remove Harness Blocks';
+const COPY_BASE_TO_HARNESS_BLOCKS = 'Copy Global to All Harnesses';
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Register all 15 commands declared in `package.json` and return a single
+ * Register all 17 commands declared in `package.json` and return a single
  * `Disposable` that unregisters them all. The activation code pushes the
  * returned value into `context.subscriptions`.
  */
@@ -114,7 +118,46 @@ export function registerCommands(
       treeProvider.refresh();
     }),
 
-    // 5. Create a new profile by snapshotting the current config.
+    // 5. Select the active config scope.
+    vscode.commands.registerCommand(
+      'ohMyOpenAgent.selectConfigScope',
+      async () => {
+        const currentScope = configStore.getScope();
+        const items = CONFIG_SCOPES.map((scope) => ({
+          label: scope,
+          picked: scope === currentScope,
+          description: scope === currentScope ? 'Current' : undefined,
+        }));
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select the active config scope',
+        });
+        if (picked === undefined) {
+          return; // user cancelled
+        }
+        const scope = picked.label as ConfigScope;
+        if (scope === currentScope) {
+          return;
+        }
+        if (
+          scope === 'global' &&
+          !(await reconcileForGlobalScope(configStore))
+        ) {
+          return;
+        }
+        try {
+          await profileStore.setConfigScope(scope);
+          configStore.setScope(scope);
+          AgentEditorPanel.closeCurrentPanel();
+          void vscode.window.showInformationMessage(
+            `The config scope changed to "${scope}". The agent editor was closed to avoid stale edits.`,
+          );
+        } catch (err) {
+          reportError('Failed to set config scope', err);
+        }
+      },
+    ),
+
+    // 6. Create a new profile by snapshotting the current config.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.createProfile',
       async () => {
@@ -343,4 +386,42 @@ function isProfileItem(
 function reportError(prefix: string, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   void vscode.window.showErrorMessage(`${prefix}: ${message}`);
+}
+
+/**
+ * Bring `omo.jsonc` in line with a switch to the `global` scope and report
+ * whether the switch may continue. Harness blocks win over the shared base,
+ * so any block that defines `agents` or `categories` would swallow every
+ * global edit; the user picks which of the two fixes to apply.
+ */
+async function reconcileForGlobalScope(
+  configStore: ConfigStore,
+): Promise<boolean> {
+  const shadowing = configStore.getShadowingHarnessScopes();
+  if (shadowing.length === 0) {
+    return true;
+  }
+
+  const blocks = shadowing.map((scope) => `[${scope}]`).join(', ');
+  const choice = await vscode.window.showWarningMessage(
+    `Harness blocks take precedence over the shared base: ${blocks}. Edits made in the "global" scope would have no effect there. Removing deletes every harness block; copying replaces each block's agents and categories with the shared base's.`,
+    { modal: true },
+    REMOVE_HARNESS_BLOCKS,
+    COPY_BASE_TO_HARNESS_BLOCKS,
+  );
+  if (choice === undefined) {
+    return false;
+  }
+
+  try {
+    if (choice === REMOVE_HARNESS_BLOCKS) {
+      await configStore.removeHarnessBlocks();
+    } else {
+      await configStore.copyBaseToHarnessBlocks();
+    }
+  } catch (err) {
+    reportError('Failed to update omo.jsonc for the global scope', err);
+    return false;
+  }
+  return true;
 }

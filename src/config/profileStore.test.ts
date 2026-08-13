@@ -91,6 +91,7 @@ interface ProfilesFileFromDisk {
   profiles: Array<Record<string, unknown>>;
   lastActiveProfile?: string;
   version: number;
+  configScope?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1561,4 +1562,143 @@ describe('ProfileStore', () => {
       expect(configStore.getAgent('sisyphus')?.model).toBe('changed');
     });
   });
+
+  describe('configScope', () => {
+    it('getConfigScope returns undefined when the sidecar does not exist', () => {
+      createStores();
+
+      expect(profileStore.getConfigScope()).toBeUndefined();
+    });
+
+    it('getConfigScope returns undefined for an invalid persisted value', () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      fs.writeFileSync(
+        sidecarPath,
+        JSON.stringify({ version: 1, profiles: [], configScope: 'not-a-scope' }),
+        'utf-8',
+      );
+
+      expect(profileStore.getConfigScope()).toBeUndefined();
+    });
+
+    it('getConfigScope returns the valid stored configScope', () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      fs.writeFileSync(
+        sidecarPath,
+        JSON.stringify({ version: 1, profiles: [], configScope: 'opencode' }),
+        'utf-8',
+      );
+
+      expect(profileStore.getConfigScope()).toBe('opencode');
+    });
+
+    it('setConfigScope creates a valid empty sidecar when none exists', async () => {
+      createStores();
+
+      await profileStore.setConfigScope('senpi');
+
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.version).toBe(1);
+      expect(onDisk.profiles).toEqual([]);
+      expect(onDisk.configScope).toBe('senpi');
+    });
+
+    it('setConfigScope writes the requested scope and emits one change event', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.setConfigScope('codex');
+
+      expect(profileStore.getConfigScope()).toBe('codex');
+      expect(readSidecar(sidecarPath).configScope).toBe('codex');
+      expect(changes).toBe(1);
+    });
+
+    it('setConfigScope is a no-op when the scope is already set', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setConfigScope('global');
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+      const before = readSidecar(sidecarPath);
+
+      await profileStore.setConfigScope('global');
+
+      expect(profileStore.getConfigScope()).toBe('global');
+      expect(changes).toBe(0);
+      expect(readSidecar(sidecarPath)).toEqual(before);
+    });
+
+    it('setConfigScope overwrites a previous scope and emits one event', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setConfigScope('opencode');
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.setConfigScope('senpi');
+
+      expect(profileStore.getConfigScope()).toBe('senpi');
+      expect(readSidecar(sidecarPath).configScope).toBe('senpi');
+      expect(changes).toBe(1);
+    });
+
+    it('preserves the local configScope when extending imported profiles', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setConfigScope('codex');
+      await profileStore.createProfile('local');
+      const sidecar: NormalizedProfilesFile = {
+        version: 1,
+        profiles: [{ name: 'remote', agents: { sisyphus: { model: 'r' } }, createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-02T00:00:00.000Z' }],
+        configScope: 'global',
+      };
+
+      await profileStore.importProfiles(sidecar, 'extend');
+
+      expect(profileStore.getConfigScope()).toBe('codex');
+      expect(readSidecar(sidecarPath).configScope).toBe('codex');
+    });
+
+    it('preserves the local configScope when replacing imported profiles', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setConfigScope('senpi');
+      await profileStore.createProfile('local');
+      const sidecar: NormalizedProfilesFile = {
+        version: 1,
+        profiles: [{ name: 'remote', agents: { sisyphus: { model: 'r' } }, createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-02T00:00:00.000Z' }],
+        configScope: 'global',
+      };
+
+      await profileStore.importProfiles(sidecar, 'replace');
+
+      expect(profileStore.getConfigScope()).toBe('senpi');
+      expect(profileStore.getProfile('local')).toBeUndefined();
+      expect(readSidecar(sidecarPath).configScope).toBe('senpi');
+    });
+
+    it('carries configScope through getProfilesFileSnapshot when present', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setConfigScope('opencode');
+      await profileStore.createProfile('alpha');
+
+      const snapshot = profileStore.getProfilesFileSnapshot();
+
+      expect(snapshot.configScope).toBe('opencode');
+    });
+
+    it('does not include configScope in getProfilesFileSnapshot when absent', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('alpha');
+
+      const snapshot = profileStore.getProfilesFileSnapshot();
+
+      expect(snapshot).not.toHaveProperty('configScope');
+    });
+  });
+
 });

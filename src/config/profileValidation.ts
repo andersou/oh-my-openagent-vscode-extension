@@ -18,7 +18,7 @@ import {
   type ValidationPath,
 } from './profileValidationPrimitives.js';
 import type { ProfileTransferRoot } from './profileTransfer.js';
-import type { AgentConfig, CategoryConfig, Profile } from './schema.js';
+import type { AgentConfig, CategoryConfig, ConfigScope, Profile } from './schema.js';
 
 export type { ProfileValidationErrorCode } from './profileValidationPrimitives.js';
 
@@ -41,6 +41,7 @@ export interface NormalizedProfilesFile {
   readonly version: 1;
   readonly profiles: Profile[];
   readonly lastActiveProfile?: string;
+  readonly configScope?: ConfigScope;
 }
 
 export type NormalizedProfileTransferRoot =
@@ -59,6 +60,7 @@ const SIDECAR_KEYS: readonly string[] = [
   'version',
   'profiles',
   'lastActiveProfile',
+  'configScope',
 ];
 const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 

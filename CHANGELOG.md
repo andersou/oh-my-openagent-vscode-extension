@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0-beta.2] - 2026-08-12
+
+This pre-release fixes the `global` config scope, which silently discarded every edit while a harness block defined `agents` or `categories`.
+
+### Bug Fixes
+
+- **Selecting the `global` scope now reconciles `omo.jsonc`** — harness blocks take precedence over the shared base, so a `[opencode]`, `[senpi]`, or `[codex]` block that defines `agents` or `categories` silently swallowed every edit made in the `global` scope. Switching to `global` now detects those blocks and asks how to update the file: **Remove Harness Blocks** deletes them so the base is the only source of overrides, or **Copy Global to All Harnesses** makes every block's `agents`/`categories` match the base — a key the base defines replaces the harness copy, a key it omits is dropped so it cannot shadow a later global value (harness-only keys such as `agent_order` are kept). Cancelling leaves both the scope and the file untouched, and switching to a harness scope never rewrites the file. Both rewrites reuse the JSONC-preserving edit path.
+
+### Tests
+
+- 631 tests pass (23 files), including 13 new cases covering shadow detection, both reconciliation paths, JSONC preservation, and the command's prompt, cancel, and failure flows.
+
+## [1.1.0-beta.1] - 2026-08-12
+
+This pre-release adds selectable config scope and migrates profile model routing to the unified `models` serialization accepted by the upstream `dev` schema (`oh-my-openagent@5.0.0-beta.7`).
+
+### BREAKING CHANGES
+
+- **Requires `oh-my-openagent` ≥ 5.0.0-beta.7 (`dev` branch)** — configs saved by this version carry the ordered `models` array, which the stable 4.19.4 schema/doctor predates and reports as unknown. `main_overrides` remains an extension-side profile field and is never written to `omo.jsonc`.
+
+### Features
+
+- **Selectable config scope** (`global`, `opencode`, `senpi`, `codex`) — switch the active scope from `Oh My OpenAgent: Select Config Scope` (Command Palette or the view-title gear). The choice persists as `configScope` in `omo.profiles.json` — never in `omo.jsonc` — and is restored on activation before the file watcher starts. The sidebar root shows the active scope next to the config file name, and switching closes the open editor with a notice. Reads fold the shared base plus the selected harness block (`global` reads the base only); writes land under the selected block (document root for `global`) with JSONC comments preserved. `agent_order`/`disabled_agents` are written only in the `opencode` scope.
+
+### Bug Fixes
+
+- **Schema-valid profile routing** — profiles keep the internal editor shape (`model` + `main_overrides` + `fallback_models`), but every write to `omo.jsonc` is converted at the ConfigStore boundary: `main_overrides` merges into the first `models` entry, `fallback_models` entries append to the chain, and reasoning-level `variant` values become `reasoning` (provider/model variants are preserved). Reads convert `models` back to the internal shape, legacy keys already on disk are migrated on the next write, and mixed legacy/modern entities combine in upstream migration order without data loss. Public `models` fragments are accepted on profile import and in the profile JSON editor.
+
+### Tests
+
+- 616 tests pass (23 files), including routing-conversion units, disk-boundary integration tests, per-scope smoke coverage, and a live Extension Development Host check of the scope label.
+
 ## [1.0.0] - 2026-08-01
 
 First stable release on the omo.dev unified config spec, promoting `1.0.0-beta.1` and `1.0.0-beta.2`. The active config is now `~/.omo/omo.jsonc` (user layer) with optional per-project `.omo/omo.jsonc` layers, and the extension edits the `[opencode]` harness block. Agents, categories, and fallback entries support the new `reasoning` field.
@@ -199,6 +231,8 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[1.1.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0-beta.1...v1.1.0-beta.2
+[1.1.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.0.0...v1.1.0-beta.1
 [1.0.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.6.0-beta.1...v1.0.0
 [0.6.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0...v0.6.0-beta.1
 [0.5.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.4.0...v0.5.0

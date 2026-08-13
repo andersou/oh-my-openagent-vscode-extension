@@ -23,6 +23,7 @@ type PackageManifest = {
     menus?: {
       'view/item/context'?: ViewItemContextMenuEntry[];
       commandPalette?: CommandPaletteEntry[];
+      'view/title'?: ViewItemContextMenuEntry[];
     };
   };
 };
@@ -41,6 +42,7 @@ describe('package.json command contributions', () => {
       'ohMyOpenAgent.editAgent',
       'ohMyOpenAgent.editCategory',
       'ohMyOpenAgent.refresh',
+      'ohMyOpenAgent.selectConfigScope',
       'ohMyOpenAgent.createProfile',
       'ohMyOpenAgent.createProfileFromConfig',
       'ohMyOpenAgent.activateProfile',
@@ -94,6 +96,25 @@ describe('package.json command contributions', () => {
       { command: 'ohMyOpenAgent.editProfileJson', when: 'false' },
       { command: 'ohMyOpenAgent.editActiveProfileJson', when: 'false' },
     ]);
+  });
+
+  it('exposes selectConfigScope in the Command Palette and view/title', () => {
+    const manifest = readPackageJson();
+    const commandPalette = manifest.contributes?.menus?.commandPalette ?? [];
+    const viewTitle = manifest.contributes?.menus?.['view/title'] ?? [];
+
+    expect(commandPalette.map(({ command }) => command)).not.toContain(
+      'ohMyOpenAgent.selectConfigScope',
+    );
+    expect(viewTitle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: 'ohMyOpenAgent.selectConfigScope',
+          when: 'view == ohMyOpenAgent.models',
+          group: 'navigation',
+        }),
+      ]),
+    );
   });
 });
 

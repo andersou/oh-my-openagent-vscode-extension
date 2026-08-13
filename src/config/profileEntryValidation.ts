@@ -19,14 +19,14 @@ import type {
 } from './schema.js';
 
 const AGENT_KEYS: readonly string[] = [
-  'model', 'variant', 'fallback_models', 'main_overrides', 'temperature',
+  'model', 'models', 'variant', 'fallback_models', 'main_overrides', 'temperature',
   'top_p', 'maxTokens', 'reasoning', 'reasoningEffort', 'thinking', 'prompt',
   'prompt_append', 'skills', 'tools', 'disable', 'description', 'permission',
   'category', 'mode', 'color', 'displayName', 'textVerbosity',
   'providerOptions', 'ultrawork', 'compaction',
 ];
 const CATEGORY_KEYS: readonly string[] = [
-  'model', 'variant', 'fallback_models', 'main_overrides', 'temperature',
+  'model', 'models', 'variant', 'fallback_models', 'main_overrides', 'temperature',
   'top_p', 'maxTokens', 'reasoning', 'reasoningEffort', 'thinking', 'textVerbosity',
   'tools', 'prompt_append', 'description', 'is_unstable_agent', 'disable',
   'max_prompt_tokens',
