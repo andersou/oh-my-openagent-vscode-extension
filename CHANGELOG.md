@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-08-12
+
+This stable release promotes `1.1.0-beta.1` and `1.1.0-beta.2`. It adds selectable config scopes, schema-valid model-routing serialization, and protection against silent edits when global settings are shadowed by harness blocks.
+
+### BREAKING CHANGES
+
+- **Requires `oh-my-openagent` >= 5.0.0-beta.7 (`dev` branch)** - saved configs use the ordered `models` serialization accepted by that upstream schema. `main_overrides` remains an extension-side profile field and is never written to `omo.jsonc`.
+
+### Features
+
+- **Selectable config scope** (`global`, `opencode`, `senpi`, `codex`) - choose where `omo.jsonc` overrides are read and written. The selection is persisted in `omo.profiles.json`, restored on activation, shown in the sidebar, and closes an open editor on switch to avoid stale writes.
+- **Schema-valid profile routing** - profiles retain the editor's internal routing model, while `ConfigStore` converts every disk read and write to the upstream `models` chain, including reasoning-level variant conversion and legacy-key migration.
+
+### Bug Fixes
+
+- **Global-scope reconciliation** - selecting `global` now detects harness blocks that shadow `agents` or `categories` and offers to remove them or copy the global values into each block. Both paths preserve JSONC formatting; cancelling changes neither scope nor file.
+
+### Tests
+
+- 631 tests pass across 23 files, including scope selection, routing conversion and disk-boundary coverage, reconciliation flows, JSONC preservation, and command prompts.
+
 ## [1.1.0-beta.2] - 2026-08-12
 
 This pre-release fixes the `global` config scope, which silently discarded every edit while a harness block defined `agents` or `categories`.
@@ -233,6 +254,7 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 
 [1.1.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0-beta.1...v1.1.0-beta.2
 [1.1.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.0.0...v1.1.0-beta.1
+[1.1.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.6.0-beta.1...v1.0.0
 [0.6.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.5.0...v0.6.0-beta.1
 [0.5.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v0.4.0...v0.5.0
