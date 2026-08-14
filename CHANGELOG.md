@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0-beta.2] - 2026-08-14
+
+### Bug Fixes
+
+- **Phantom profile modifications after switching profiles** - agents such as `prometheus` no longer appear modified when the only difference is `main_overrides` provenance. The `latest` dialect flattens main overrides into top-level disk fields, so active-profile comparison now folds overrides into effective routing before diffing; genuine changes still report the concrete field.
+
+### Tests
+
+- 671 tests pass across 23 files, including active-profile diff coverage for flattened `main_overrides` and genuine override changes.
+
 ## [1.2.0-beta.1] - 2026-08-14
 
 This beta relaxes the `1.1.0` requirement on `oh-my-openagent >= 5.0.0-beta.7`: a new selectable routing dialect makes the saved config pass `oh-my-opencode doctor` on both omo 4.x stable and 5.x, without losing the mainline serialization work.
@@ -270,6 +280,7 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[1.2.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.2.0-beta.1...v1.2.0-beta.2
 [1.2.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0...v1.2.0-beta.1
 [1.1.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0-beta.1...v1.1.0-beta.2
 [1.1.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.0.0...v1.1.0-beta.1
