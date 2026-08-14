@@ -171,6 +171,31 @@ function isReasoningVariant(variant: unknown): boolean {
   return typeof variant === 'string' && REASONING_VARIANTS.has(variant);
 }
 
+/**
+ * Fold `main_overrides` into the top-level tuning fields so two entries can be
+ * compared by effective routing rather than by provenance. The `latest` disk
+ * dialect flattens main overrides into the top level, so a profile snapshot
+ * carrying `main_overrides` and a live entry read back from disk differ in
+ * shape while meaning the same thing. Override values win on collision, except
+ * `model`, which always stays the main model. Reasoning-level `variant` values
+ * are normalized to `reasoning` on both the entry and its fallback chains.
+ */
+export function normalizeRoutingForComparison(
+  entry: Entry,
+): Record<string, unknown> {
+  const result = mutableClone(entry);
+  normalizeReasoningVariants(result);
+  if (isRecord(result.main_overrides)) {
+    const overrides = result.main_overrides;
+    delete overrides.model;
+    for (const [key, value] of Object.entries(overrides)) {
+      result[key] = value;
+    }
+    delete result.main_overrides;
+  }
+  return result;
+}
+
 function hasMainlineLegacyRouting(entry: Entry): boolean {
   if (entry.main_overrides !== undefined || entry.fallback_models !== undefined) {
     return true;

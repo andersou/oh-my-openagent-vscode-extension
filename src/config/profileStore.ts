@@ -27,6 +27,7 @@ import {
   resolveProfileNameCollisions,
 } from './profileTransferSerialization.js';
 import { toInternalRoutingFragment } from './routingConversion.js';
+import { normalizeRoutingForComparison } from './routingConversion.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -799,12 +800,20 @@ export class ProfileStore {
         result.push({ group, name, type: 'added' });
       } else if (inConfig === undefined) {
         result.push({ group, name, type: 'removed' });
-      } else if (!deepEqual(inProfile, inConfig)) {
-        const changedFields = this.diffFieldNames(
+      } else {
+        const normalizedProfile = normalizeRoutingForComparison(
           inProfile as Record<string, unknown>,
+        );
+        const normalizedConfig = normalizeRoutingForComparison(
           inConfig as Record<string, unknown>,
         );
-        result.push({ group, name, type: 'modified', changedFields });
+        if (!deepEqual(normalizedProfile, normalizedConfig)) {
+          const changedFields = this.diffFieldNames(
+            normalizedProfile,
+            normalizedConfig,
+          );
+          result.push({ group, name, type: 'modified', changedFields });
+        }
       }
     }
     return result.sort((a, b) => a.name.localeCompare(b.name));

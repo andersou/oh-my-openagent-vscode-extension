@@ -1812,4 +1812,108 @@ describe('ProfileStore', () => {
       expect(snapshot).not.toHaveProperty('routingDialect');
     });
   });
+
+  // -----------------------------------------------------------------------
+  // getActiveProfileModifications
+  // -----------------------------------------------------------------------
+
+  describe('getActiveProfileModifications', () => {
+    it('ignores main_overrides flattened to top level by the latest disk dialect', () => {
+      // Given: a live config in the latest-dialect flattened form
+      fs.writeFileSync(
+        configPath,
+        `{
+          "[opencode]": {
+            "agents": {
+              "prometheus": {
+                "model": "a/main",
+                "reasoning": "high",
+                "fallback_models": [{ "model": "b/fallback", "reasoning": "high" }],
+              },
+            },
+          },
+        }
+        `,
+        'utf-8',
+      );
+      // And: an active profile snapshot in the editor's internal main_overrides shape
+      fs.writeFileSync(
+        sidecarPath,
+        JSON.stringify({
+          version: 1,
+          profiles: [
+            {
+              name: 'kimi',
+              agents: {
+                prometheus: {
+                  model: 'a/main',
+                  reasoning: 'high',
+                  main_overrides: { reasoning: 'high' },
+                  fallback_models: [{ model: 'b/fallback', reasoning: 'high' }],
+                },
+              },
+            },
+          ],
+          lastActiveProfile: 'kimi',
+        }),
+        'utf-8',
+      );
+      createStores();
+
+      // When/Then: equal semantics, so no modification is reported
+      expect(profileStore.getActiveProfileModifications()).toEqual([]);
+    });
+
+    it('still reports a real field change after normalization', () => {
+      // Given: the same live config, but the profile pins a different main reasoning
+      fs.writeFileSync(
+        configPath,
+        `{
+          "[opencode]": {
+            "agents": {
+              "prometheus": {
+                "model": "a/main",
+                "reasoning": "high",
+                "fallback_models": [{ "model": "b/fallback", "reasoning": "high" }],
+              },
+            },
+          },
+        }
+        `,
+        'utf-8',
+      );
+      fs.writeFileSync(
+        sidecarPath,
+        JSON.stringify({
+          version: 1,
+          profiles: [
+            {
+              name: 'kimi',
+              agents: {
+                prometheus: {
+                  model: 'a/main',
+                  reasoning: 'high',
+                  main_overrides: { reasoning: 'low' },
+                  fallback_models: [{ model: 'b/fallback', reasoning: 'high' }],
+                },
+              },
+            },
+          ],
+          lastActiveProfile: 'kimi',
+        }),
+        'utf-8',
+      );
+      createStores();
+
+      // When/Then: the folded override reports the underlying field, not main_overrides
+      expect(profileStore.getActiveProfileModifications()).toEqual([
+        {
+          group: 'agents',
+          name: 'prometheus',
+          type: 'modified',
+          changedFields: ['reasoning'],
+        },
+      ]);
+    });
+  });
 });
