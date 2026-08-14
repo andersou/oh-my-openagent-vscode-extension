@@ -296,4 +296,113 @@ describe('routing boundary', () => {
     expect(readRaw()).not.toContain('configScope');
     expect(profileStore.getConfigScope()).toBe('opencode');
   });
+
+  describe('routing dialect writes', () => {
+    it('latest + opencode writes fallback_models and never models for a chain', async () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      configStore = new ConfigStore(tmpDir, undefined, 'opencode', 'latest');
+
+      await configStore.updateConfig((draft) => {
+        draft.agents = {
+          sisyphus: { model: 'a/one', fallback_models: ['b/two'] },
+        };
+      });
+
+      const raw = readRaw();
+      expect(readAgent('sisyphus')).toEqual({
+        model: 'a/one',
+        fallback_models: ['b/two'],
+      });
+      expect(raw).not.toContain('"models"');
+    });
+
+    it('latest + senpi writes the models array', async () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      configStore = new ConfigStore(tmpDir, undefined, 'senpi', 'latest');
+
+      await configStore.updateConfig((draft) => {
+        draft.agents = {
+          sisyphus: { model: 'a/one', fallback_models: ['b/two'] },
+        };
+      });
+
+      const parsed = parse(readRaw(), [], { allowTrailingComma: true }) as {
+        '[senpi]'?: { agents?: Record<string, Record<string, unknown>> };
+      };
+      expect(parsed['[senpi]']?.agents?.sisyphus).toEqual({
+        models: ['a/one', 'b/two'],
+      });
+    });
+
+    it('latest + global writes model-only and drops chain keys', async () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      configStore = new ConfigStore(tmpDir, undefined, 'global', 'latest');
+
+      await configStore.updateConfig((draft) => {
+        draft.agents = {
+          sisyphus: { model: 'a/one', fallback_models: ['b/two'] },
+        };
+      });
+
+      const raw = readRaw();
+      const parsed = parse(raw, [], { allowTrailingComma: true }) as {
+        agents?: Record<string, Record<string, unknown>>;
+      };
+      expect(parsed.agents?.sisyphus).toEqual({ model: 'a/one' });
+      expect(raw).not.toContain('fallback_models');
+      expect(raw).not.toContain('"models"');
+    });
+
+    it('latest + opencode rewrites a legacy models array to fallback_models', async () => {
+      writeConfig(`{
+  "[opencode]": {
+    "agents": {
+      "sisyphus": {
+        "models": [
+          { "model": "a/one", "temperature": 0.3 },
+          "b/two"
+        ]
+      }
+    }
+  }
+}
+`);
+      configStore = new ConfigStore(tmpDir, undefined, 'opencode', 'latest');
+
+      await configStore.updateConfig((draft) => {
+        draft.categories = { deep: { model: 'c/three' } };
+      });
+
+      const raw = readRaw();
+      expect(readAgent('sisyphus')).toEqual({
+        model: 'a/one',
+        temperature: 0.3,
+        fallback_models: ['b/two'],
+      });
+      expect(raw).not.toContain('"models"');
+    });
+
+    it('mainline + opencode rewrites a legacy fallback_models file to models', async () => {
+      writeConfig(`{
+  "[opencode]": {
+    "agents": {
+      "sisyphus": {
+        "model": "a/one",
+        "fallback_models": ["b/two"]
+      }
+    }
+  }
+}
+`);
+      configStore = new ConfigStore(tmpDir, undefined, 'opencode', 'mainline');
+
+      await configStore.updateConfig((draft) => {
+        draft.categories = { deep: { model: 'c/three' } };
+      });
+
+      expect(readAgent('sisyphus')).toEqual({
+        models: ['a/one', 'b/two'],
+      });
+    });
+  });
 });

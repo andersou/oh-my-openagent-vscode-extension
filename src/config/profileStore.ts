@@ -13,6 +13,8 @@ import type {
   OmOConfig,
 } from './schema.js';
 import { CONFIG_SCOPES } from './schema.js';
+import type { RoutingDialect } from './routingConversion.js';
+import { ROUTING_DIALECTS } from './routingConversion.js';
 import type {
   NormalizedProfilesFile,
   ProfileFragment,
@@ -205,6 +207,7 @@ export class ProfileStore {
         lastActiveProfile: data.lastActiveProfile,
         version: data.version ?? 1,
         configScope: data.configScope,
+        routingDialect: data.routingDialect,
       };
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -273,6 +276,7 @@ export class ProfileStore {
     const snapshot: NormalizedProfilesFile & {
       lastActiveProfile?: string;
       configScope?: ConfigScope;
+      routingDialect?: RoutingDialect;
     } = {
       version: 1,
       profiles: data.profiles,
@@ -282,6 +286,9 @@ export class ProfileStore {
     }
     if (data.configScope !== undefined) {
       snapshot.configScope = data.configScope;
+    }
+    if (data.routingDialect !== undefined) {
+      snapshot.routingDialect = data.routingDialect;
     }
     return cloneProfilesFile(snapshot);
   }
@@ -728,6 +735,32 @@ export class ProfileStore {
       return;
     }
     data.configScope = scope;
+    await this.writeProfilesFile(data);
+  }
+
+  /**
+   * Return the persisted routing dialect if it is a valid {@link RoutingDialect},
+   * otherwise `undefined`. Missing sidecar also returns `undefined`.
+   */
+  getRoutingDialect(): RoutingDialect | undefined {
+    const dialect = this.readProfilesFile().routingDialect;
+    if (ROUTING_DIALECTS.includes(dialect as RoutingDialect)) {
+      return dialect as RoutingDialect;
+    }
+    return undefined;
+  }
+
+  /**
+   * Persist the requested routing dialect in the sidecar. Creates a new
+   * `{ version: 1, profiles: [] }` sidecar when none exists. Emits one
+   * `change` event when the stored value actually changes.
+   */
+  async setRoutingDialect(dialect: RoutingDialect): Promise<void> {
+    const data = this.readProfilesFile();
+    if (data.routingDialect === dialect) {
+      return;
+    }
+    data.routingDialect = dialect;
     await this.writeProfilesFile(data);
   }
 

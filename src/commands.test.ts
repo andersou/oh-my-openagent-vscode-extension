@@ -151,7 +151,7 @@ describe('registerCommands', () => {
     vi.clearAllMocks();
   });
 
-  it('registers all 17 command IDs including selectConfigScope', () => {
+  it('registers all 18 command IDs including selectConfigScope and selectRoutingDialect', () => {
     const calls = register(createDependencies());
 
     expect(calls.map(([id]) => id)).toEqual([
@@ -160,6 +160,7 @@ describe('registerCommands', () => {
       'ohMyOpenAgent.editCategory',
       'ohMyOpenAgent.refresh',
       'ohMyOpenAgent.selectConfigScope',
+      'ohMyOpenAgent.selectRoutingDialect',
       'ohMyOpenAgent.createProfile',
       'ohMyOpenAgent.activateProfile',
       'ohMyOpenAgent.renameProfile',

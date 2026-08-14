@@ -209,4 +209,5 @@ export interface ProfilesFile {
   lastActiveProfile?: string;
   version?: number;
   configScope?: ConfigScope;
+  routingDialect?: import('./routingConversion.js').RoutingDialect;
 }

@@ -5,6 +5,8 @@ function createFakeConfigStore() {
   return {
     getScope: vi.fn(() => 'opencode'),
     setScope: vi.fn(),
+    getRoutingDialect: vi.fn(() => 'mainline'),
+    setRoutingDialect: vi.fn(),
     getConfigPath: vi.fn(() => '/home/.omo/omo.jsonc'),
     getBaseDir: vi.fn(() => '/home/.omo'),
     getAgent: vi.fn(),
@@ -26,6 +28,8 @@ function createFakeProfileStore() {
   return {
     getConfigScope: vi.fn(),
     setConfigScope: vi.fn(),
+    getRoutingDialect: vi.fn(),
+    setRoutingDialect: vi.fn(),
     createProfile: vi.fn(),
     activateProfile: vi.fn(),
     renameProfile: vi.fn(),
@@ -123,10 +127,11 @@ describe('activate', () => {
     vi.clearAllMocks();
   });
 
-  it('restores the persisted config scope before the tree provider and startWatch', () => {
+  it('restores the persisted config scope and routing dialect before the tree provider and startWatch', () => {
     const fakeConfigStore = createFakeConfigStore();
     const fakeProfileStore = createFakeProfileStore();
     fakeProfileStore.getConfigScope.mockReturnValue('senpi');
+    fakeProfileStore.getRoutingDialect.mockReturnValue('latest');
     vi.mocked(ConfigStore).mockImplementation(function () {
       return fakeConfigStore as never;
     });
@@ -140,7 +145,9 @@ describe('activate', () => {
     } as vscode.ExtensionContext);
 
     expect(fakeProfileStore.getConfigScope).toHaveBeenCalled();
+    expect(fakeProfileStore.getRoutingDialect).toHaveBeenCalled();
     expect(fakeConfigStore.setScope).toHaveBeenCalledWith('senpi');
+    expect(fakeConfigStore.setRoutingDialect).toHaveBeenCalledWith('latest');
     expect(fakeConfigStore.setScope).toHaveBeenCalledBefore(
       AgentModelTreeProvider,
     );
@@ -149,10 +156,11 @@ describe('activate', () => {
     );
   });
 
-  it('falls back to the default scope when no scope is persisted', () => {
+  it('falls back to the default scope and dialect when none are persisted', () => {
     const fakeConfigStore = createFakeConfigStore();
     const fakeProfileStore = createFakeProfileStore();
     fakeProfileStore.getConfigScope.mockReturnValue(undefined);
+    fakeProfileStore.getRoutingDialect.mockReturnValue(undefined);
     vi.mocked(ConfigStore).mockImplementation(function () {
       return fakeConfigStore as never;
     });
@@ -166,9 +174,10 @@ describe('activate', () => {
     } as vscode.ExtensionContext);
 
     expect(fakeConfigStore.setScope).toHaveBeenCalledWith('opencode');
+    expect(fakeConfigStore.setRoutingDialect).toHaveBeenCalledWith('latest');
   });
 
-  it('starts watching and registers commands after restoring the scope', () => {
+  it('starts watching and registers commands after restoring the scope and dialect', () => {
     const fakeConfigStore = createFakeConfigStore();
     const fakeProfileStore = createFakeProfileStore();
     fakeProfileStore.getConfigScope.mockReturnValue('codex');

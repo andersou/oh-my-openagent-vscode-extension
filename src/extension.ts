@@ -33,8 +33,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const configStore = new ConfigStore();
   const profileStore = new ProfileStore(configStore);
 
-  // Restore the persisted scope before the tree provider and watcher are created.
+  // Restore the persisted scope and routing dialect before the tree provider and watcher are created.
   configStore.setScope(profileStore.getConfigScope() ?? 'opencode');
+  configStore.setRoutingDialect(profileStore.getRoutingDialect() ?? 'latest');
 
   // ---- Tree provider ----
   // The provider subscribes to both stores' `change` events and re-fires

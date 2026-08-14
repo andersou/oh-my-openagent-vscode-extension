@@ -754,6 +754,8 @@ function makeMockConfigStore(): ConfigStore {
     onDidChange: emitter,
     getAgent: (name: string) => agents[name],
     getCategory: () => undefined,
+    getScope: () => 'opencode',
+    getRoutingDialect: () => 'mainline',
     updateConfig: async (updater: (draft: { agents?: Record<string, AgentConfig> }) => void) => {
       const draft = { agents: { ...agents } };
       updater(draft);
@@ -773,6 +775,8 @@ function makeProfileAwareConfigStore(): ConfigStore & {
     onDidChange: new EventEmitter(),
     getAgent: getAgentMock,
     getCategory: vi.fn(() => undefined),
+    getScope: vi.fn(() => 'opencode'),
+    getRoutingDialect: vi.fn(() => 'mainline'),
     updateConfig: updateConfigMock,
     getAgentMock,
     updateConfigMock,

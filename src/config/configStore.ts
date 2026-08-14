@@ -18,11 +18,13 @@ import {
 } from './schema.js';
 import type { PublicOmOConfig } from './routingConversion.js';
 import {
-  ROUTING_ENTITY_KEYS,
   hasLegacyRouting,
+  routingScopeKindForScope,
   toInternalRoutingConfig,
   toPublicRoutingConfig,
   toPublicRoutingEntry,
+  type RoutingDialect,
+  type RoutingScopeKind,
 } from './routingConversion.js';
 
 // ---------------------------------------------------------------------------
@@ -219,6 +221,7 @@ export class ConfigStore {
   /** Whether project-layer walking is active. */
   private readonly projectLayersEnabled: boolean;
   private scope: ConfigScope;
+  private dialect: RoutingDialect;
   private configPath: string | null = null;
   private cachedConfig: OmOConfig | null = null;
   private cachedRaw: string | null = null;
@@ -239,11 +242,13 @@ export class ConfigStore {
     baseDir?: string,
     workspaceDir?: string,
     scope: ConfigScope = 'opencode',
+    dialect: RoutingDialect = 'mainline',
   ) {
     this.baseDir = baseDir ?? defaultBaseDir();
     this.workspaceDir = workspaceDir ?? process.cwd();
     this.projectLayersEnabled = baseDir === undefined || workspaceDir !== undefined;
     this.scope = scope;
+    this.dialect = dialect;
   }
 
   // ---- Event ----
@@ -298,6 +303,25 @@ export class ConfigStore {
       return;
     }
     this.scope = scope;
+    this.cachedConfig = null;
+    this.cachedRaw = null;
+    this._emitter.emit('change');
+  }
+
+  /** Return the active routing dialect. */
+  getRoutingDialect(): RoutingDialect {
+    return this.dialect;
+  }
+
+  /**
+   * Switch the active routing dialect, invalidate the in-memory cache, and emit
+   * a single change event. Calling with the current dialect is a no-op.
+   */
+  setRoutingDialect(dialect: RoutingDialect): void {
+    if (dialect === this.dialect) {
+      return;
+    }
+    this.dialect = dialect;
     this.cachedConfig = null;
     this.cachedRaw = null;
     this._emitter.emit('change');
@@ -466,10 +490,14 @@ export class ConfigStore {
     // changes are written — after migrating routing keys the public schema
     // rejects, so the updater's changes always win over the migration.
     const prefix = writePrefixForScope(this.scope);
-    const publicDraft = toPublicRoutingConfig(draft);
+    const scopeKind = routingScopeKindForScope(this.scope);
+    const publicDraft = toPublicRoutingConfig(draft, this.dialect, scopeKind);
     const patches = [
-      ...this.legacyRoutingPatches(prefix, publicDraft),
-      ...diffConfigs(toPublicRoutingConfig(effective), publicDraft),
+      ...this.legacyRoutingPatches(prefix, publicDraft, this.dialect, scopeKind),
+      ...diffConfigs(
+        toPublicRoutingConfig(effective, this.dialect, scopeKind),
+        publicDraft,
+      ),
     ];
     if (patches.length === 0) {
       return; // nothing changed
@@ -540,6 +568,8 @@ export class ConfigStore {
   private legacyRoutingPatches(
     prefix: readonly string[],
     publicDraft: PublicOmOConfig,
+    dialect: RoutingDialect,
+    scopeKind: RoutingScopeKind,
   ): Array<[JSONPath, unknown]> {
     const document = this.parseJson(this.cachedRaw ?? '', this.getConfigPath());
     const scopeRoot = prefix.length === 0 ? document : document[prefix[0]];
@@ -554,17 +584,18 @@ export class ConfigStore {
         continue;
       }
       for (const [name, rawEntry] of Object.entries(rawGroup)) {
-        if (!isPlainObject(rawEntry) || !hasLegacyRouting(rawEntry)) {
+        if (!isPlainObject(rawEntry) || !hasLegacyRouting(rawEntry, dialect, scopeKind)) {
           continue;
         }
         if (!Object.hasOwn(draftGroup, name)) {
           continue;
         }
-        const converted = toPublicRoutingEntry(rawEntry);
-        if (hasLegacyRouting(converted)) {
+        const converted = toPublicRoutingEntry(rawEntry, dialect, scopeKind);
+        if (hasLegacyRouting(converted, dialect, scopeKind)) {
           continue;
         }
-        for (const key of ROUTING_ENTITY_KEYS) {
+        const allKeys = new Set([...Object.keys(rawEntry), ...Object.keys(converted)]);
+        for (const key of allKeys) {
           if (JSON.stringify(rawEntry[key]) === JSON.stringify(converted[key])) {
             continue;
           }
@@ -642,14 +673,20 @@ export class ConfigStore {
    */
   async copyBaseToHarnessBlocks(): Promise<void> {
     const document = this.readUserDocument();
-    const base = toPublicRoutingConfig(
-      toInternalRoutingConfig(pickOmOConfig(document, 'global')),
+    const internalBase = toInternalRoutingConfig(
+      pickOmOConfig(document, 'global'),
     );
 
     const patches: Array<[JSONPath, unknown]> = [];
     for (const scope of HARNESS_SCOPES) {
       const blockKey = `[${scope}]`;
       const block = document[blockKey];
+      const scopeKind = routingScopeKindForScope(scope);
+      const base = toPublicRoutingConfig(
+        internalBase,
+        this.dialect,
+        scopeKind,
+      );
       for (const key of omoConfigKeysForScope('global')) {
         if (base[key] !== undefined) {
           patches.push([[blockKey, key], base[key]]);

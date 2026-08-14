@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasLegacyRouting,
+  routingScopeKindForScope,
   toInternalRoutingConfig,
   toInternalRoutingEntry,
   toPublicRoutingConfig,
   toPublicRoutingEntry,
+  type RoutingDialect,
+  type RoutingScopeKind,
 } from './routingConversion.js';
 
 describe('toPublicRoutingEntry', () => {
@@ -386,5 +389,253 @@ describe('routing config conversion', () => {
     // Then: the empty object survives
     expect(toPublicRoutingConfig({})).toEqual({});
     expect(toInternalRoutingConfig({})).toEqual({});
+  });
+});
+
+describe('latest dialect routing', () => {
+  it('maps every ConfigScope to the correct routing scope kind', () => {
+    expect(routingScopeKindForScope('global')).toBe('global');
+    expect(routingScopeKindForScope('opencode')).toBe('opencode');
+    expect(routingScopeKindForScope('senpi')).toBe('harness');
+    expect(routingScopeKindForScope('codex')).toBe('harness');
+  });
+
+  it('flattens main_overrides to top level in latest+opencode', () => {
+    // Given: an entry with main overrides
+    const entry = {
+      model: 'a/one',
+      temperature: 0.4,
+      main_overrides: { reasoningEffort: 'high', top_p: 0.9 },
+    };
+
+    // When: converting with the latest dialect and opencode scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'opencode');
+
+    // Then: overrides are flattened, model stays, and legacy keys are gone
+    expect(result).toEqual({
+      model: 'a/one',
+      temperature: 0.4,
+      reasoningEffort: 'high',
+      top_p: 0.9,
+    });
+    expect(Object.hasOwn(result, 'models')).toBe(false);
+    expect(Object.hasOwn(result, 'main_overrides')).toBe(false);
+  });
+
+  it('lets overrides win on collision, except model stays the main model', () => {
+    // Given: an override that also names a model
+    const entry = {
+      model: 'a/one',
+      temperature: 0.4,
+      main_overrides: { model: 'b/two', temperature: 0.1, top_p: 0.9 },
+    };
+
+    // When: converting with the latest dialect and opencode scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'opencode');
+
+    // Then: the override wins on temperature/top_p, but model stays primary
+    expect(result).toEqual({
+      model: 'a/one',
+      temperature: 0.1,
+      top_p: 0.9,
+    });
+    expect(Object.hasOwn(result, 'main_overrides')).toBe(false);
+  });
+
+  it('normalizes a lone string fallback to a one-element array in latest+opencode', () => {
+    // Given: the legacy scalar fallback form
+    const entry = { model: 'a/one', fallback_models: 'b/two' };
+
+    // When: converting with the latest dialect and opencode scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'opencode');
+
+    // Then: fallback_models is a dense array and model stays separate
+    expect(result).toEqual({
+      model: 'a/one',
+      fallback_models: ['b/two'],
+    });
+  });
+
+  it('preserves object fallback entries in latest+opencode', () => {
+    // Given: a fallback chain with a string and an object entry
+    const entry = {
+      model: 'a/one',
+      fallback_models: ['b/two', { model: 'c/three', temperature: 0.2 }],
+    };
+
+    // When: converting with the latest dialect and opencode scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'opencode');
+
+    // Then: object keys survive and no models array is emitted
+    expect(result).toEqual({
+      model: 'a/one',
+      fallback_models: ['b/two', { model: 'c/three', temperature: 0.2 }],
+    });
+  });
+
+  it('drops fallback chains entirely in latest+global', () => {
+    // Given: an entry with fallbacks
+    const entry = {
+      model: 'a/one',
+      fallback_models: ['b/two', { model: 'c/three', temperature: 0.2 }],
+    };
+
+    // When: converting with the latest dialect and global scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'global');
+
+    // Then: only the plain main model survives
+    expect(result).toEqual({ model: 'a/one' });
+    expect(Object.hasOwn(result, 'fallback_models')).toBe(false);
+    expect(Object.hasOwn(result, 'models')).toBe(false);
+  });
+
+  it('keeps mainline behavior for latest+harness', () => {
+    // Given: an entry with overrides and a fallback
+    const entry = {
+      model: 'a/one',
+      temperature: 0.4,
+      main_overrides: { reasoningEffort: 'high', top_p: 0.9 },
+      fallback_models: ['b/two'],
+    };
+
+    // When: converting with the latest dialect but harness scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'harness');
+
+    // Then: output is byte-for-byte the mainline dialect
+    expect(result).toEqual({
+      temperature: 0.4,
+      models: [
+        { model: 'a/one', reasoningEffort: 'high', top_p: 0.9 },
+        'b/two',
+      ],
+    });
+    expect(Object.hasOwn(result, 'model')).toBe(false);
+    expect(Object.hasOwn(result, 'main_overrides')).toBe(false);
+    expect(Object.hasOwn(result, 'fallback_models')).toBe(false);
+  });
+
+  it('preserves reasoning-level variant normalization in latest+opencode', () => {
+    // Given: reasoning-style variants at top level and on a fallback
+    const entry = {
+      model: 'a/one',
+      variant: 'high',
+      main_overrides: { variant: 'max' },
+      fallback_models: [{ model: 'b/two', variant: 'low' }],
+    };
+
+    // When: converting with the latest dialect and opencode scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'opencode');
+
+    // Then: every reasoning-style variant becomes reasoning, overrides win on collision
+    expect(result).toEqual({
+      model: 'a/one',
+      reasoning: 'max',
+      fallback_models: [{ model: 'b/two', reasoning: 'low' }],
+    });
+    expect(Object.hasOwn(result, 'variant')).toBe(false);
+    expect(Object.hasOwn(result, 'main_overrides')).toBe(false);
+  });
+
+  it('is idempotent in latest+opencode', () => {
+    // Given: an entry with every legacy routing form
+    const entry = {
+      model: 'a/one',
+      variant: 'high',
+      main_overrides: { temperature: 0.1 },
+      fallback_models: ['b/two'],
+    };
+
+    // When: converting twice
+    const once = toPublicRoutingEntry(entry, 'latest', 'opencode');
+    const twice = toPublicRoutingEntry(once, 'latest', 'opencode');
+
+    // Then: the second pass changes nothing
+    expect(twice).toEqual(once);
+  });
+
+  it('collapses mixed legacy input in latest+opencode preserving migration order', () => {
+    // Given: an entry carrying both representations during migration
+    const entry = {
+      model: 'legacy/main',
+      main_overrides: { variant: 'high', temperature: 0.9 },
+      fallback_models: ['legacy/fallback'],
+      models: [{ model: 'modern/main', reasoning: 'high' }],
+    };
+
+    // When: converting with the latest dialect and opencode scope
+    const result = toPublicRoutingEntry(entry, 'latest', 'opencode');
+
+    // Then: primary is model + flattened overrides; chain is modern entries then legacy fallbacks
+    expect(result).toEqual({
+      model: 'legacy/main',
+      reasoning: 'high',
+      temperature: 0.9,
+      fallback_models: [
+        { model: 'modern/main', reasoning: 'high' },
+        'legacy/fallback',
+      ],
+    });
+    expect(Object.hasOwn(result, 'models')).toBe(false);
+    expect(Object.hasOwn(result, 'main_overrides')).toBe(false);
+  });
+
+  it('classifies legacy routing correctly in latest mode', () => {
+    // Given/When/Then: a truth table for legacy detection
+    expect(hasLegacyRouting({ model: 'a/one', models: ['b/two'] }, 'latest', 'opencode')).toBe(true);
+    expect(hasLegacyRouting({ model: 'a/one', main_overrides: { temperature: 0.1 } }, 'latest', 'opencode')).toBe(true);
+    expect(hasLegacyRouting({ model: 'a/one', variant: 'high' }, 'latest', 'opencode')).toBe(true);
+    expect(hasLegacyRouting({ model: 'a/one', fallback_models: ['b/two'] }, 'latest', 'opencode')).toBe(false);
+    expect(hasLegacyRouting({ model: 'a/one' }, 'latest', 'opencode')).toBe(false);
+  });
+
+  it('flags fallback_models as legacy in latest+global so it gets dropped', () => {
+    // Given/When/Then: the global scope cannot carry chains, so they are legacy there
+    expect(hasLegacyRouting({ model: 'a/one', fallback_models: ['b/two'] }, 'latest', 'global')).toBe(true);
+    expect(hasLegacyRouting({ model: 'a/one', models: ['b/two'] }, 'latest', 'global')).toBe(true);
+    expect(hasLegacyRouting({ model: 'a/one' }, 'latest', 'global')).toBe(false);
+  });
+
+  it('uses the mainline legacy predicate in latest+harness', () => {
+    // Given/When/Then: harness blocks keep the models dialect, so fallback_models is legacy
+    expect(hasLegacyRouting({ model: 'a/one', fallback_models: ['b/two'] }, 'latest', 'harness')).toBe(true);
+    expect(hasLegacyRouting({ model: 'a/one', models: ['b/two'] }, 'latest', 'harness')).toBe(true);
+    expect(hasLegacyRouting({ models: ['a/one', 'b/two'] }, 'latest', 'harness')).toBe(false);
+    expect(hasLegacyRouting({ model: 'a/one' }, 'latest', 'harness')).toBe(false);
+  });
+
+  it('converts a whole config in latest+opencode', () => {
+    // Given: a config with legacy routing in both groups
+    const config = {
+      agents: { sisyphus: { model: 'a/one', main_overrides: { temperature: 0.1 } } },
+      categories: { deep: { model: 'b/two', fallback_models: ['c/three'] } },
+      agent_order: ['sisyphus'],
+      disabled_agents: ['momus'],
+    };
+
+    // When: converting with the latest dialect and opencode scope
+    const result = toPublicRoutingConfig(config, 'latest', 'opencode');
+
+    // Then: agents flatten overrides and categories keep fallback arrays
+    expect(result).toEqual({
+      agents: { sisyphus: { model: 'a/one', temperature: 0.1 } },
+      categories: { deep: { model: 'b/two', fallback_models: ['c/three'] } },
+      agent_order: ['sisyphus'],
+      disabled_agents: ['momus'],
+    });
+  });
+
+  it('does not mutate its input in latest mode', () => {
+    // Given: an entry with legacy routing
+    const entry = { model: 'a/one', main_overrides: { temperature: 0.1 }, fallback_models: 'b/two' };
+
+    // When: converting
+    toPublicRoutingEntry(entry, 'latest', 'opencode');
+
+    // Then: the caller's object is untouched
+    expect(entry).toEqual({
+      model: 'a/one',
+      main_overrides: { temperature: 0.1 },
+      fallback_models: 'b/two',
+    });
   });
 });

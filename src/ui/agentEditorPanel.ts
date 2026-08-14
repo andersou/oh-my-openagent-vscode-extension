@@ -134,6 +134,13 @@ function getNullKeys(raw: unknown): Set<string> {
   return nullKeys;
 }
 
+function hasNonEmptyFallbackChain(payload: Record<string, unknown>): boolean {
+  const fb = payload.fallback_models;
+  if (Array.isArray(fb)) return fb.length > 0;
+  if (typeof fb === 'string') return fb.length > 0;
+  return false;
+}
+
 function versionedTargetFor(item: EditorItem): VersionedTarget {
   if (item.type === 'profileJson') {
     return {
@@ -609,6 +616,21 @@ export class AgentEditorPanel implements vscode.Disposable {
     });
   }
 
+  private async _warnIfGlobalLatestWithFallbacks(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    if (
+      this._configStore.getRoutingDialect() === 'latest' &&
+      this._configStore.getScope() === 'global' &&
+      hasNonEmptyFallbackChain(payload) &&
+      typeof vscode.window.showWarningMessage === 'function'
+    ) {
+      await vscode.window.showWarningMessage(
+        'omo 4.x cannot store fallback chains in the global scope (they will be dropped from disk; switch scope to opencode or dialect to mainline to keep fallbacks).',
+      );
+    }
+  }
+
   private async _handleSave(
     rawPayload: unknown,
     target: VersionedTarget | undefined,
@@ -640,6 +662,9 @@ export class AgentEditorPanel implements vscode.Disposable {
             nullKeys,
           );
           if (this._profileStore.getActiveProfileName() === item.profile) {
+            await this._warnIfGlobalLatestWithFallbacks(
+              validated as Record<string, unknown>,
+            );
             await this._configStore.updateConfig((draft) => {
               if (!draft.agents) {
                 draft.agents = {};
@@ -653,6 +678,9 @@ export class AgentEditorPanel implements vscode.Disposable {
             await this._profileStore.saveActiveConfigToProfile();
           }
         } else {
+          await this._warnIfGlobalLatestWithFallbacks(
+            validated as Record<string, unknown>,
+          );
           await this._configStore.updateConfig((draft) => {
             if (!draft.agents) {
               draft.agents = {};
@@ -679,6 +707,9 @@ export class AgentEditorPanel implements vscode.Disposable {
             nullKeys,
           );
           if (this._profileStore.getActiveProfileName() === item.profile) {
+            await this._warnIfGlobalLatestWithFallbacks(
+              validated as Record<string, unknown>,
+            );
             await this._configStore.updateConfig((draft) => {
               if (!draft.categories) {
                 draft.categories = {};
@@ -692,6 +723,9 @@ export class AgentEditorPanel implements vscode.Disposable {
             await this._profileStore.saveActiveConfigToProfile();
           }
         } else {
+          await this._warnIfGlobalLatestWithFallbacks(
+            validated as Record<string, unknown>,
+          );
           await this._configStore.updateConfig((draft) => {
             if (!draft.categories) {
               draft.categories = {};

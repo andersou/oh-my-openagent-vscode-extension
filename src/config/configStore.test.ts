@@ -844,6 +844,45 @@ describe('ConfigStore', () => {
       expect(store.getAgent('sisyphus')?.model).toBe('old/model');
       expect(changes).toBe(0);
     });
+
+    it('defaults to mainline routing dialect', () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      store = new ConfigStore(tmpDir);
+
+      expect(store.getRoutingDialect()).toBe('mainline');
+    });
+
+    it('setRoutingDialect switches dialect, invalidates cache, and emits one change event', () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      store = new ConfigStore(tmpDir);
+      expect(store.getAgent('sisyphus')?.model).toBe('old/model');
+
+      let changes = 0;
+      store.onDidChange.on('change', () => {
+        changes++;
+      });
+
+      store.setRoutingDialect('latest');
+      expect(store.getRoutingDialect()).toBe('latest');
+      expect(store.getAgent('sisyphus')?.model).toBe('old/model');
+      expect(changes).toBe(1);
+    });
+
+    it('setRoutingDialect with same value is a complete no-op', () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      store = new ConfigStore(tmpDir);
+      expect(store.getAgent('sisyphus')?.model).toBe('old/model');
+
+      let changes = 0;
+      store.onDidChange.on('change', () => {
+        changes++;
+      });
+
+      store.setRoutingDialect('mainline');
+      expect(store.getRoutingDialect()).toBe('mainline');
+      expect(store.getAgent('sisyphus')?.model).toBe('old/model');
+      expect(changes).toBe(0);
+    });
   });
 
   describe('global scope reconciliation', () => {

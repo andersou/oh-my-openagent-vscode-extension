@@ -972,6 +972,36 @@ describe('smoke: per-scope end-to-end writes', () => {
     await new Promise((r) => setTimeout(r, 30));
   }
 
+  async function openAgentEditorAndSavePayload(
+    configStore: ConfigStore,
+    profileStore: ProfileStore,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const modelDiscovery = new ModelDiscovery(stubExecutor([]) as never, extensionPath);
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+
+    const { panel, sendToWebview } = makeMockWebviewPanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus' },
+    );
+
+    sendToWebview('ready');
+    await new Promise((r) => setTimeout(r, 30));
+
+    sendToWebview('save', {
+      target: { type: 'agent', name: 'sisyphus', profile: null },
+      payload,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
   it('default opencode scope writes agent under [opencode] and preserves comments/trailing commas', async () => {
     const configStore = new ConfigStore(tmpDir);
     const profileStore = new ProfileStore(configStore);
@@ -1119,5 +1149,82 @@ describe('smoke: per-scope end-to-end writes', () => {
     expect(raw).not.toContain('configScope');
 
     configStore.dispose();
+  });
+
+  it('latest + opencode writes fallback_models and never models for a chain', async () => {
+    const configStore = new ConfigStore(tmpDir, undefined, 'opencode', 'latest');
+    const profileStore = new ProfileStore(configStore);
+
+    await openAgentEditorAndSavePayload(configStore, profileStore, {
+      model: 'a/one',
+      fallback_models: ['b/two'],
+    });
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    expect(raw).toContain('"fallback_models"');
+    expect(raw).not.toContain('"models"');
+    expect(configStore.getAgent('sisyphus')).toEqual({
+      model: 'a/one',
+      fallback_models: ['b/two'],
+    });
+
+    configStore.dispose();
+  });
+
+  it('latest + senpi writes the models array', async () => {
+    const configStore = new ConfigStore(tmpDir, undefined, 'senpi', 'latest');
+    const profileStore = new ProfileStore(configStore);
+
+    await openAgentEditorAndSavePayload(configStore, profileStore, {
+      model: 'a/one',
+      fallback_models: ['b/two'],
+    });
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    expect(raw).toContain('"[senpi]"');
+    expect(raw).toContain('"models"');
+    expect(configStore.getAgent('sisyphus')).toEqual({
+      model: 'a/one',
+      fallback_models: ['b/two'],
+    });
+
+    configStore.dispose();
+  });
+
+  it('latest + global writes model-only and drops chain keys', async () => {
+    const configStore = new ConfigStore(tmpDir, undefined, 'global', 'latest');
+    const profileStore = new ProfileStore(configStore);
+
+    await openAgentEditorAndSavePayload(configStore, profileStore, {
+      model: 'a/one',
+      fallback_models: ['b/two'],
+    });
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    expect(raw).not.toContain('fallback_models');
+    expect(raw).not.toContain('"models"');
+    expect(configStore.getAgent('sisyphus')).toEqual({ model: 'a/one' });
+
+    configStore.dispose();
+  });
+
+  it('warns before saving a fallback chain to global scope in latest dialect', async () => {
+    const configStore = new ConfigStore(tmpDir, undefined, 'global', 'latest');
+    const profileStore = new ProfileStore(configStore);
+    const { warnings, showWarningMessage } = makeMessageCapture();
+    (vscode.window as unknown as { showWarningMessage: typeof showWarningMessage }).showWarningMessage =
+      showWarningMessage;
+
+    await openAgentEditorAndSavePayload(configStore, profileStore, {
+      model: 'a/one',
+      fallback_models: ['b/two'],
+    });
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('omo 4.x cannot store fallback chains');
+    expect(raw).not.toContain('fallback_models');
+    expect(raw).not.toContain('"models"');
+    expect(configStore.getAgent('sisyphus')).toEqual({ model: 'a/one' });
   });
 });

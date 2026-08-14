@@ -31,6 +31,10 @@ import type {
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
 import { CONFIG_SCOPES, type ConfigScope } from './config/schema.js';
 import {
+  ROUTING_DIALECTS,
+  type RoutingDialect,
+} from './config/routingConversion.js';
+import {
   createProfileTransferCommandContext,
   registerProfileTransferCommands,
 } from './profileTransferCommands.js';
@@ -157,7 +161,45 @@ export function registerCommands(
       },
     ),
 
-    // 6. Create a new profile by snapshotting the current config.
+    // 6. Select the active routing dialect.
+    vscode.commands.registerCommand(
+      'ohMyOpenAgent.selectRoutingDialect',
+      async () => {
+        const currentDialect = configStore.getRoutingDialect();
+        const items = ROUTING_DIALECTS.map((dialect) => ({
+          label: dialect,
+          picked: dialect === currentDialect,
+          description:
+            dialect === currentDialect
+              ? 'Current'
+              : dialect === 'latest'
+                ? 'compatible with omo 4.x stable — writes fallback_models in the opencode scope'
+                : 'omo 5.x mainline — writes the models array',
+        }));
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select the active routing dialect',
+        });
+        if (picked === undefined) {
+          return; // user cancelled
+        }
+        const dialect = picked.label as RoutingDialect;
+        if (dialect === currentDialect) {
+          return;
+        }
+        try {
+          await profileStore.setRoutingDialect(dialect);
+          configStore.setRoutingDialect(dialect);
+          treeProvider.refresh();
+          void vscode.window.showInformationMessage(
+            `The routing dialect changed to "${dialect}".`,
+          );
+        } catch (err) {
+          reportError('Failed to set routing dialect', err);
+        }
+      },
+    ),
+
+    // 7. Create a new profile by snapshotting the current config.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.createProfile',
       async () => {

@@ -1,4 +1,4 @@
-import type { AgentConfig, CategoryConfig, OmOConfig } from './schema.js';
+import type { AgentConfig, CategoryConfig, ConfigScope, OmOConfig } from './schema.js';
 
 // ---------------------------------------------------------------------------
 // Internal ↔ public routing conversion
@@ -6,15 +6,36 @@ import type { AgentConfig, CategoryConfig, OmOConfig } from './schema.js';
 // The extension keeps an INTERNAL routing representation (`model` +
 // `main_overrides` + `fallback_models`, plus the legacy `variant`) because the
 // ordered-card editor and saved profiles are built around it. The PUBLIC
-// representation written to `omo.jsonc` is what the upstream schema and
-// `oh-my-openagent doctor` accept: one ordered `models` array plus `reasoning`.
+// representation written to `omo.jsonc` is dialect- and scope-dependent.
 //
-// Conversion rules
-//   * `models[0]` is the primary; every later entry is a fallback, in order.
+// Dialect × scope matrix (verified empirically against oh-my-opencode 4.19.4
+// and 5.0.0-pre bundles plus live `doctor` runs):
+//
+//   * `mainline` (default): emit one ordered `models` array whose first entry
+//     is the primary model merged with `main_overrides`, followed by every
+//     fallback. This is the behavior the strict core schema accepts inside
+//     `[senpi]`/`[codex]` blocks and the only form the 4.x plugin schema
+//     accepts at the config root.
+//   * `latest` + `opencode`: emit `model` (plain main model string) with the
+//     former `main_overrides` fields flattened to the top level. On key
+//     collision the override value wins, except `model` always stays the main
+//     model. `fallback_models` is emitted as a dense array (a lone string
+//     fallback becomes a one-element array; object entries keep their keys).
+//     `models` and `main_overrides` are never emitted. This matches the 5.x
+//     runtime's `materializeAgentModelChains` shape for the `[opencode]` block,
+//     which is opaque to the 4.x core schema.
+//   * `latest` + `global`: identical to `latest` + `opencode` except fallback
+//     chains are dropped entirely — the 4.x plugin schema rejects `models` at
+//     the root, and the strict core schema rejects `fallback_models` and
+//     `category` there.
+//   * `latest` + `harness`: identical to `mainline` — the strict core schema
+//     accepts `models` inside `[senpi]`/`[codex]` blocks and the opencode plugin
+//     validator ignores those blocks.
+//
+// Conversion rules shared by all dialects
 //   * The primary merges `model` with `main_overrides`; a primary without
 //     overrides stays a plain model string.
 //   * `main_overrides` is NEVER emitted — it is not in the upstream schema.
-//   * `fallback_models` is NEVER emitted — doctor 4.19.4 deprecates it.
 //   * A `variant` holding a reasoning level becomes `reasoning`; a
 //     provider/model variant is kept as `variant`, which upstream still accepts.
 //     The conversion applies to the primary, to each fallback object, and to
@@ -22,6 +43,11 @@ import type { AgentConfig, CategoryConfig, OmOConfig } from './schema.js';
 //   * Mixed modern and legacy routing follows upstream migration order:
 //     legacy primary, existing modern entries, then legacy fallbacks.
 //   * Non-routing fields are copied through untouched.
+//
+// The READ path (`toInternalRoutingEntry`/`toInternalRoutingConfig`) is
+// bilingual and unchanged: it accepts both `models` chains and the internal
+// `model`/`main_overrides`/`fallback_models` shape and always produces the
+// internal representation.
 // ---------------------------------------------------------------------------
 
 /** Routing keys a public `models[]` entry may carry (upstream schema). */
@@ -40,16 +66,6 @@ export const PUBLIC_MODEL_ENTRY_KEYS: readonly string[] = [
   'thinking',
 ];
 
-/** Entity keys the conversion owns; everything else is passed through. */
-export const ROUTING_ENTITY_KEYS: readonly string[] = [
-  'model',
-  'models',
-  'variant',
-  'reasoning',
-  'main_overrides',
-  'fallback_models',
-];
-
 /** `variant` values that mean a reasoning level rather than a model variant. */
 const REASONING_VARIANTS = new Set<string>([
   'off',
@@ -62,15 +78,20 @@ const REASONING_VARIANTS = new Set<string>([
   'auto',
 ]);
 
-export type PublicAgentConfig = Omit<
-  AgentConfig,
-  'main_overrides' | 'fallback_models'
->;
+export type PublicAgentConfig = Omit<AgentConfig, 'main_overrides'>;
 
-export type PublicCategoryConfig = Omit<
-  CategoryConfig,
-  'main_overrides' | 'fallback_models'
->;
+export type PublicCategoryConfig = Omit<CategoryConfig, 'main_overrides'>;
+
+export type RoutingDialect = 'latest' | 'mainline';
+export type RoutingScopeKind = 'global' | 'opencode' | 'harness';
+
+export const ROUTING_DIALECTS = ['latest', 'mainline'] as const;
+
+export function routingScopeKindForScope(scope: ConfigScope): RoutingScopeKind {
+  if (scope === 'global') return 'global';
+  if (scope === 'opencode') return 'opencode';
+  return 'harness';
+}
 
 export interface PublicOmOConfig {
   agents?: Record<string, PublicAgentConfig>;
@@ -146,15 +167,42 @@ function normalizeReasoningVariants(entry: Record<string, unknown>): void {
   }
 }
 
-/** True when the entry still carries routing that the public schema rejects. */
-export function hasLegacyRouting(entry: Entry): boolean {
+function isReasoningVariant(variant: unknown): boolean {
+  return typeof variant === 'string' && REASONING_VARIANTS.has(variant);
+}
+
+function hasMainlineLegacyRouting(entry: Entry): boolean {
   if (entry.main_overrides !== undefined || entry.fallback_models !== undefined) {
     return true;
   }
   if (entry.model !== undefined && entry.models !== undefined) {
     return true;
   }
-  return typeof entry.variant === 'string' && REASONING_VARIANTS.has(entry.variant);
+  return isReasoningVariant(entry.variant);
+}
+
+/** True when the entry still carries routing that the public schema rejects. */
+export function hasLegacyRouting(
+  entry: Entry,
+  dialect: RoutingDialect = 'mainline',
+  scopeKind: RoutingScopeKind = 'opencode',
+): boolean {
+  if (dialect === 'mainline' || scopeKind === 'harness') {
+    return hasMainlineLegacyRouting(entry);
+  }
+  if (scopeKind === 'global') {
+    return (
+      entry.models !== undefined ||
+      entry.main_overrides !== undefined ||
+      entry.fallback_models !== undefined ||
+      isReasoningVariant(entry.variant)
+    );
+  }
+  return (
+    entry.models !== undefined ||
+    entry.main_overrides !== undefined ||
+    isReasoningVariant(entry.variant)
+  );
 }
 
 /** Convert one entity from the public dialect to the internal one. */
@@ -204,8 +252,8 @@ export function toInternalRoutingEntry(entry: Entry): Record<string, unknown> {
   return result;
 }
 
-/** Convert one entity from the internal dialect to the public one. */
-export function toPublicRoutingEntry(entry: Entry): Record<string, unknown> {
+/** Convert one entity from the internal dialect to the mainline public one. */
+function toMainlinePublicRoutingEntry(entry: Entry): Record<string, unknown> {
   const result = toInternalRoutingEntry(entry);
   const overrides = isRecord(result.main_overrides) ? result.main_overrides : {};
   const fallbacks = fallbackEntries(result.fallback_models);
@@ -227,6 +275,63 @@ export function toPublicRoutingEntry(entry: Entry): Record<string, unknown> {
     ...fallbacks,
   ];
   return result;
+}
+
+/** Convert one entity from the internal dialect to the latest public one. */
+function toLatestPublicRoutingEntry(
+  entry: Entry,
+  scopeKind: Extract<RoutingScopeKind, 'opencode' | 'global'>,
+): Record<string, unknown> {
+  const preprocessed = mutableClone(entry);
+  normalizeReasoningVariants(preprocessed);
+
+  // Preserve the original primary model even if `main_overrides` also names one.
+  if (isRecord(preprocessed.main_overrides)) {
+    const overrides = preprocessed.main_overrides;
+    delete overrides.model;
+    if (Object.keys(overrides).length > 0) {
+      preprocessed.main_overrides = overrides;
+    } else {
+      delete preprocessed.main_overrides;
+    }
+  }
+
+  const internal = toInternalRoutingEntry(preprocessed);
+  const primary = internal.model;
+  if (typeof primary !== 'string') {
+    return internal;
+  }
+
+  const result: Record<string, unknown> = { ...internal };
+  delete result.models;
+  delete result.main_overrides;
+  delete result.fallback_models;
+
+  const overrides = isRecord(internal.main_overrides) ? internal.main_overrides : {};
+  for (const [key, value] of Object.entries(overrides)) {
+    result[key] = value;
+  }
+
+  if (scopeKind === 'opencode') {
+    const fallbacks = fallbackEntries(internal.fallback_models);
+    if (fallbacks.length > 0) {
+      result.fallback_models = fallbacks;
+    }
+  }
+
+  return result;
+}
+
+/** Convert one entity from the internal dialect to the public one. */
+export function toPublicRoutingEntry(
+  entry: Entry,
+  dialect: RoutingDialect = 'mainline',
+  scopeKind: RoutingScopeKind = 'opencode',
+): Record<string, unknown> {
+  if (dialect === 'mainline' || scopeKind === 'harness') {
+    return toMainlinePublicRoutingEntry(entry);
+  }
+  return toLatestPublicRoutingEntry(entry, scopeKind);
 }
 
 function convertRoutingConfig(
@@ -254,8 +359,15 @@ function convertRoutingConfig(
 // helpers above and the exported, typed API.
 
 /** Convert a whole config to the shape written to `omo.jsonc`. */
-export function toPublicRoutingConfig(config: OmOConfig): PublicOmOConfig {
-  return convertRoutingConfig(config, toPublicRoutingEntry) as PublicOmOConfig;
+export function toPublicRoutingConfig(
+  config: OmOConfig,
+  dialect: RoutingDialect = 'mainline',
+  scopeKind: RoutingScopeKind = 'opencode',
+): PublicOmOConfig {
+  return convertRoutingConfig(
+    config,
+    (entry) => toPublicRoutingEntry(entry, dialect, scopeKind),
+  ) as PublicOmOConfig;
 }
 
 /** Convert a whole config read from `omo.jsonc` to the internal shape. */

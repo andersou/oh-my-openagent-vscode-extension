@@ -1701,4 +1701,115 @@ describe('ProfileStore', () => {
     });
   });
 
+  describe('routingDialect', () => {
+    it('getRoutingDialect returns undefined when the sidecar does not exist', () => {
+      createStores();
+
+      expect(profileStore.getRoutingDialect()).toBeUndefined();
+    });
+
+    it('getRoutingDialect returns undefined for an invalid persisted value', () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      fs.writeFileSync(
+        sidecarPath,
+        JSON.stringify({ version: 1, profiles: [], routingDialect: 'not-a-dialect' }),
+        'utf-8',
+      );
+
+      expect(profileStore.getRoutingDialect()).toBeUndefined();
+    });
+
+    it('getRoutingDialect returns the valid stored routingDialect', () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      fs.writeFileSync(
+        sidecarPath,
+        JSON.stringify({ version: 1, profiles: [], routingDialect: 'latest' }),
+        'utf-8',
+      );
+
+      expect(profileStore.getRoutingDialect()).toBe('latest');
+    });
+
+    it('setRoutingDialect creates a valid empty sidecar when none exists', async () => {
+      createStores();
+
+      await profileStore.setRoutingDialect('mainline');
+
+      const onDisk = readSidecar(sidecarPath);
+      expect(onDisk.version).toBe(1);
+      expect(onDisk.profiles).toEqual([]);
+      expect(onDisk.routingDialect).toBe('mainline');
+    });
+
+    it('setRoutingDialect writes the requested dialect and emits one change event', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.setRoutingDialect('mainline');
+
+      expect(profileStore.getRoutingDialect()).toBe('mainline');
+      expect(readSidecar(sidecarPath).routingDialect).toBe('mainline');
+      expect(changes).toBe(1);
+    });
+
+    it('setRoutingDialect is a no-op when the dialect is already set', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setRoutingDialect('mainline');
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.setRoutingDialect('mainline');
+
+      expect(profileStore.getRoutingDialect()).toBe('mainline');
+      expect(changes).toBe(0);
+    });
+
+    it('setRoutingDialect overwrites a previous dialect and emits one event', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setRoutingDialect('latest');
+      let changes = 0;
+      profileStore.onDidChange.on('change', () => {
+        changes += 1;
+      });
+
+      await profileStore.setRoutingDialect('mainline');
+
+      expect(profileStore.getRoutingDialect()).toBe('mainline');
+      expect(readSidecar(sidecarPath).routingDialect).toBe('mainline');
+      expect(changes).toBe(1);
+    });
+
+    it('round-trips through a fresh ProfileStore instance', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setRoutingDialect('latest');
+
+      const freshProfileStore = new ProfileStore(configStore, sidecarPath);
+
+      expect(freshProfileStore.getRoutingDialect()).toBe('latest');
+    });
+
+    it('includes routingDialect in getProfilesFileSnapshot when set', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.setRoutingDialect('mainline');
+      await profileStore.createProfile('alpha');
+
+      const snapshot = profileStore.getProfilesFileSnapshot();
+
+      expect(snapshot.routingDialect).toBe('mainline');
+    });
+
+    it('does not include routingDialect in getProfilesFileSnapshot when absent', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('alpha');
+
+      const snapshot = profileStore.getProfilesFileSnapshot();
+
+      expect(snapshot).not.toHaveProperty('routingDialect');
+    });
+  });
 });

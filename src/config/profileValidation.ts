@@ -42,6 +42,7 @@ export interface NormalizedProfilesFile {
   readonly profiles: Profile[];
   readonly lastActiveProfile?: string;
   readonly configScope?: ConfigScope;
+  readonly routingDialect?: import('./routingConversion.js').RoutingDialect;
 }
 
 export type NormalizedProfileTransferRoot =
@@ -61,6 +62,7 @@ const SIDECAR_KEYS: readonly string[] = [
   'profiles',
   'lastActiveProfile',
   'configScope',
+  'routingDialect',
 ];
 const ISO_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -181,9 +183,11 @@ function profilesFile(value: unknown): NormalizedProfilesFile {
       profile(entry, ['profiles', index]),
     ),
   };
-  if (!Object.hasOwn(object, 'lastActiveProfile')) return result;
-  nonblankString(object.lastActiveProfile, ['lastActiveProfile']);
-  return { ...result, lastActiveProfile: object.lastActiveProfile.trim() };
+  if (Object.hasOwn(object, 'lastActiveProfile')) {
+    nonblankString(object.lastActiveProfile, ['lastActiveProfile']);
+    return { ...result, lastActiveProfile: object.lastActiveProfile.trim() };
+  }
+  return result;
 }
 
 function captured<T>(validation: () => T): ProfileValidationResult<T> {
