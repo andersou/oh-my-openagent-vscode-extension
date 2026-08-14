@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-08-14
+
+This stable release promotes `1.2.0-beta.1` and `1.2.0-beta.2`. It restores omo 4.x stable compatibility without discarding the omo 5.x routing format, and fixes false active-profile modification indicators after a profile switch.
+
+### Features
+
+- **Selectable routing dialect** (`latest`, `mainline`) - the `Oh My OpenAgent: Select Disk Routing Dialect` command persists the chosen disk-routing encoding as `routingDialect` in `omo.profiles.json` and restores it on activation. The default `latest` dialect supports omo 4.x stable; `mainline` retains the ordered `models` serialization for omo >= 5.0.0.
+- **Scope-aware stable compatibility** - the `latest` dialect writes `model` + flattened overrides + `fallback_models` in the `opencode` scope, retains the `models` array for `senpi`/`codex`, and warns before a global-scope save drops a fallback chain that omo 4.x cannot represent.
+- **Bidirectional routing migration** - both disk forms remain readable, and changing dialect rewrites deprecated routing keys on the next save.
+
+### Bug Fixes
+
+- **omo 4.x stable doctor compatibility** - `oh-my-opencode doctor` no longer fails on `agents.*.models` when using the default dialect. The stable channel retains one benign `fallback_models` deprecation warning, which disappears after switching to `mainline` on omo >= 5.0.0.
+- **Phantom profile modifications** - active-profile comparison now compares effective routing, so `prometheus` and other agents are not marked modified solely because `main_overrides` was flattened into equivalent top-level disk fields. Genuine changes still identify the concrete field.
+
+### Tests
+
+- 671 tests pass across 23 files, covering dialect and scope serialization, doctor-compatible legacy sweeps, sidecar persistence, global-scope warnings, and semantic active-profile diffs.
+
 ## [1.2.0-beta.2] - 2026-08-14
 
 ### Bug Fixes
@@ -280,6 +299,7 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[1.2.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0...v1.2.0
 [1.2.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.2.0-beta.1...v1.2.0-beta.2
 [1.2.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0...v1.2.0-beta.1
 [1.1.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0-beta.1...v1.1.0-beta.2
