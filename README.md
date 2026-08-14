@@ -70,6 +70,21 @@ On a fresh install the extension creates `~/.omo/omo.jsonc` on first write. Lega
 
 Profiles live next to the user config in `omo.profiles.json`. A legacy `oh-my-openagent.profiles.json` sidecar is renamed automatically on first access.
 
+## Routing dialect
+
+The extension can write agent and category routing to `omo.jsonc` in either of two dialects. Choose the active **routing dialect** to match the version of Oh My OpenAgent you are running:
+
+- **`mainline`** — the omo ≥ 5.0.0 dialect. Writes one ordered `models` array per agent or category. The first entry is the main model merged with its overrides, and later entries are fallbacks. A reasoning-level `variant` is stored as `reasoning`.
+- **`latest`** — the omo 4.x stable dialect, and the default. In the `opencode` scope it writes `model` plus flattened top-level overrides plus `fallback_models`; in the `senpi` and `codex` scopes it writes the `models` array; in the `global` scope it writes model-only entries and drops fallback chains, with an editor warning when a chain cannot be represented.
+
+Select the dialect with the `Oh My OpenAgent: Select Disk Routing Dialect` command. It is available from the Command Palette and from the gear icon in the Models view title. The command shows the two dialects, marks the current one, and updates the active dialect on selection.
+
+Your choice is persisted as a `routingDialect` field inside the `omo.profiles.json` sidecar file, next to the user config. It is **not** stored as a VS Code setting. On activation the extension restores the persisted dialect, falling back to `latest` when none is saved. Switching dialects rewrites deprecated routing keys on the next save, which is the migration path in either direction.
+
+### Why two dialects?
+
+The 4.x and 5.x runtimes disagree on which routing keys are valid. In omo 4.19.4 the plugin schema rejects `agents.*.models` (unknown key, doctor fails), while its strict unified core schema rejects `agents.*.fallback_models` and `agents.*.category` at the root and inside `[senpi]` and `[codex]`. The `[opencode]` block is opaque to the core schema, so `[opencode].agents.*.fallback_models` is the only agent-chain encoding that passes `doctor` on 4.x stable (with a harmless "deprecated key" warning) and is honored by both the 4.x and 5.x runtimes. `categories.*.models` is valid on both versions. The `latest` dialect keeps configs compatible with omo 4.x stable; the `mainline` dialect opts into the newer `models`-array schema for omo ≥ 5.0.0.
+
 ## Requirements
 
 - VS Code 1.85 or newer
@@ -302,7 +317,7 @@ extension.ts  (activation orchestrator)
 ### Key design decisions
 
 - **ConfigStore is pure Node.js** — zero VS Code dependency, making it testable in isolation with vitest. File watching uses `fs.watch` with 150 ms debounce and a `suppressWatch` flag to ignore self-triggered events during atomic writes.
-- **Routing conversion at the disk boundary** — the editor and saved profiles keep the internal routing shape (`model`, `main_overrides`, `fallback_models`), while `omo.jsonc` only ever receives what the upstream schema accepts: one ordered `models` array whose first entry is the main model merged with its overrides, and `reasoning` in place of a reasoning-level `variant`. `routingConversion.ts` holds both directions; `ConfigStore` converts on every read and every write, and rewrites deprecated routing keys it finds in the user file on the next write. A provider/model `variant` is left alone.
+- **Routing conversion at the disk boundary** — the editor and saved profiles keep the internal routing shape (`model`, `main_overrides`, `fallback_models`). The extension supports two on-disk routing dialects selected by a routing dialect flag: `mainline` (omo ≥ 5.0.0) writes one ordered `models` array whose first entry is the main model merged with its overrides, with `reasoning` replacing a reasoning-level `variant`; `latest` (omo 4.x stable, the default) writes `model` + flattened top-level overrides + `fallback_models` in the opencode scope, the `models` array in the senpi/codex scopes, and model-only entries (chains dropped, with an editor warning) in the global scope; reads accept both dialects and deprecated keys are rewritten to the active dialect on the next write. `routingConversion.ts` holds both directions; `ConfigStore` converts on every read and every write. A provider/model `variant` is left alone.
 - **Atomic writes everywhere** — both `ConfigStore` and `ProfileStore` write via temp-file + `fs.renameSync`, guaranteeing no partial content even on crash.
 - **Per-path JSONC diffing** — `updateConfig()` deep-clones the parsed config, runs the updater callback, then `diffConfigs()` recursively compares original and draft. Each changed JSON path gets its own `jsonc-parser` `modify()` call, so comments and formatting on untouched keys are never disturbed.
 - **Webview security** — strict CSP with `default-src 'none'`, per-render nonces via `crypto.randomBytes(16)`, local resource roots restricted to `out/` only, and all DOM text insertion uses `.textContent` (never `innerHTML`).
@@ -362,8 +377,8 @@ Tests are written with Vitest. The suite covers the extension's main behaviors:
 | `smoke.test.ts` | End-to-end editor saves across stores, panel, tree, JSONC writes, profile transfer round-trips, and JSON editing |
 | `packageMenus.test.ts` | The 17-command contribution surface and contextual menu visibility |
 | `configStore.test.ts` | Config discovery, JSONC parsing, formatting-preserving updates, key removal, and file watching |
-| `routingConversion.test.ts` | Internal ↔ public routing conversion: `models` chains, main overrides, reasoning-style variants, precedence, and idempotency |
-| `routingBoundary.test.ts` | End-to-end routing dialect at the disk boundary: legacy profile activation, on-disk migration, inverse reads, snapshots, and JSON-editor saves |
+| `routingConversion.test.ts` | Internal ↔ public routing conversion for both dialects: `models` chains, `model`/`fallback_models` chains, main overrides, reasoning-style variants, precedence, and idempotency |
+| `routingBoundary.test.ts` | End-to-end routing dialect at the disk boundary: `mainline` and `latest` writes, legacy profile activation, on-disk migration, inverse reads, snapshots, and JSON-editor saves |
 | `modelRouting.test.ts` | Ordered-card promotion, shared defaults, fallback inheritance and overrides, serialization, removal, and session-bound routing intent |
 | `modelCapabilities.test.ts` | Capability validation for effective inherited and overridden settings |
 | `webview.test.ts` | Model picker behavior, ordered-list editor integration, drag promotion, fallback editing, profile JSON editor UI, and persisted state |
