@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0-beta.1] - 2026-08-14
+
+This beta relaxes the `1.1.0` requirement on `oh-my-openagent >= 5.0.0-beta.7`: a new selectable routing dialect makes the saved config pass `oh-my-opencode doctor` on both omo 4.x stable and 5.x, without losing the mainline serialization work.
+
+### Features
+
+- **Selectable routing dialect** (`latest`, `mainline`) - the `Oh My OpenAgent: Select Disk Routing Dialect` command switches the on-disk routing encoding. The choice is persisted as `routingDialect` in `omo.profiles.json` (not a VS Code setting) and restored on activation. Default is `latest`.
+- **`latest` dialect writes omo 4.x-compatible routing** - the `opencode` scope receives `model` + flattened top-level overrides + `fallback_models`, the only agent-chain encoding the 4.x plugin schema, the strict core schema, and both runtimes accept. The `senpi`/`codex` scopes keep the `models` array. The `global` scope writes model-only entries, and the editor warns before saving a fallback chain that 4.x cannot represent there.
+- **Bidirectional migration on save** - reads accept both dialects, and deprecated routing keys are rewritten to the active dialect on the next write, so switching dialects migrates `omo.jsonc` in either direction.
+
+### Bug Fixes
+
+- **omo 4.x stable compatibility** - omo 4.19.4's plugin schema rejects `agents.*.models` (unknown key) while its strict core schema rejects `agents.*.fallback_models` and `agents.*.category` at the root and in `[senpi]`/`[codex]`; `1.1.0` wrote `models` everywhere, so `oh-my-opencode doctor` failed on stable. The default `latest` dialect exits 0 on both channels (one benign `fallback_models` deprecation warning on stable, which disappears after switching to `mainline`).
+
+### Tests
+
+- 669 tests pass across 23 files, including dialect × scope conversion truth tables, disk-boundary sweeps in both dialects, the 18-command surface, sidecar persistence of `routingDialect`, and the global-scope chain warning.
+
 ## [1.1.0] - 2026-08-12
 
 This stable release promotes `1.1.0-beta.1` and `1.1.0-beta.2`. It adds selectable config scopes, schema-valid model-routing serialization, and protection against silent edits when global settings are shadowed by harness blocks.
@@ -252,6 +270,7 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[1.2.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0...v1.2.0-beta.1
 [1.1.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0-beta.1...v1.1.0-beta.2
 [1.1.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.0.0...v1.1.0-beta.1
 [1.1.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.0.0...v1.1.0
