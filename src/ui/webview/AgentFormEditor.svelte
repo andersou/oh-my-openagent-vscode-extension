@@ -17,6 +17,7 @@
   } from './modelRouting.js';
 
   let { init, postMessage } = $props();
+  const EDITABLE_SETTINGS = ['reasoning', 'temperature', 'top_p', 'maxTokens', 'thinking'];
 
   let lastInitKey = '';
   let entityKind = $state(null);
@@ -39,7 +40,7 @@
 
   let mainCard = $derived(routing.cards[0]);
   let hasInheritedSettings = $derived(routing.cards.some((card) =>
-    Object.values(card.overrides).some((setting) => setting.mode === 'inherit')));
+    EDITABLE_SETTINGS.some((key) => card.overrides[key].mode === 'inherit')));
   let validationErrors = $derived(mergeValidationErrors(validateModelRouting(routingSnapshot()), validateModelCapabilities(routingSnapshot(), modelMetadata)));
   let mainMetadata = $derived(modelMetadata[mainCard?.model] ?? null);
 

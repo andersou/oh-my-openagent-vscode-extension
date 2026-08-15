@@ -340,7 +340,7 @@ describe('smoke: end-to-end editor flow', () => {
     configStore.dispose();
   });
 
-  it('keeps an active profile clean after saving its agent from the editor', async () => {
+  it('projects the active profile after saving its agent from the editor', async () => {
     // Given: a live config that diverged from its active profile before an editor save
     const configStore = new ConfigStore(tmpDir);
     const profileStore = new ProfileStore(configStore);
@@ -373,10 +373,9 @@ describe('smoke: end-to-end editor flow', () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
 
-    // Then: the profile sidecar snapshots the JSONC config and is no longer dirty
+    // Then: the profile remains authoritative and replaces unrelated config drift
     expect(profileStore.getProfile('fast')?.agents?.sisyphus).toEqual({
       model: 'new/model',
-      permission: { edit: 'ask' },
     });
     expect(profileStore.isActiveProfileModified()).toBe(false);
 
@@ -812,7 +811,7 @@ describe('smoke: end-to-end editor flow', () => {
     configStore.dispose();
   });
 
-  it('reports active-saved-profile second-write failure and leaves config updated, sidecar old', async () => {
+  it('keeps a saved profile authoritative when projecting it to config fails', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-01-02T03:04:05.000Z'));
@@ -827,7 +826,7 @@ describe('smoke: end-to-end editor flow', () => {
       const { panel, sendToWebview, messages } = makeMockWebviewPanel();
       vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
 
-      const spy = vi.spyOn(profileStore, 'saveActiveConfigToProfile').mockRejectedValueOnce(new Error('sidecar locked'));
+      const spy = vi.spyOn(profileStore, 'projectActiveProfileToConfig').mockRejectedValueOnce(new Error('config locked'));
 
       AgentEditorPanel.showProfileJson(
         makeExtensionContext(extensionPath),
@@ -838,23 +837,33 @@ describe('smoke: end-to-end editor flow', () => {
         'active',
       );
       sendToWebview('ready');
-      await new Promise((r) => setTimeout(r, 30));
+      const ready = Promise.withResolvers<void>();
+      setImmediate(ready.resolve);
+      await ready.promise;
       sendToWebview('save', {
         target: { type: 'profileJson', source: 'saved', profile: 'active' },
         payload: '{\n  "agents": {\n    "sisyphus": {\n      "model": "updated"\n    }\n  }\n}',
       });
-      await new Promise((r) => setTimeout(r, 30));
+      const saved = Promise.withResolvers<void>();
+      setImmediate(saved.resolve);
+      await saved.promise;
 
       const errorMsg = messages.find(
-        (m): m is { command: string; message: string } =>
-          typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'error',
+        (message): message is { command: string; message: string } =>
+          typeof message === 'object' &&
+          message !== null &&
+          'command' in message &&
+          message.command === 'error' &&
+          'message' in message &&
+          typeof message.message === 'string',
       );
-      expect(errorMsg).toBeDefined();
-      expect(errorMsg?.message).toContain('Saved to active config but failed to snapshot profile');
-      expect(errorMsg?.message).toContain('sidecar locked');
-      expect(configStore.getAgent('sisyphus')?.model).toBe('updated');
-      expect(fs.readFileSync(configPath, 'utf-8')).toContain('"updated"');
-      expect(readSidecar(tmpDir).profiles[0]?.agents?.sisyphus?.model).toBe('old/model');
+      expect(errorMsg?.message).toContain(
+        'Profile saved but failed to update active config',
+      );
+      expect(errorMsg?.message).toContain('config locked');
+      expect(configStore.getAgent('sisyphus')?.model).toBe('old/model');
+      expect(fs.readFileSync(configPath, 'utf-8')).toContain('"old/model"');
+      expect(readSidecar(tmpDir).profiles[0]?.agents?.sisyphus?.model).toBe('updated');
       expect(profileStore.isActiveProfileModified()).toBe(true);
 
       spy.mockRestore();

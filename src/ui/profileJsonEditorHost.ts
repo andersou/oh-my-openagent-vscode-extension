@@ -112,14 +112,14 @@ export async function saveProfileJson(
     } else {
       const activeName = profileStore.getActiveProfileName();
       if (activeName === target.profile) {
-        await profileStore.replaceActiveConfigFragment(fragment);
+        await profileStore.replaceProfileFragment(target.profile, fragment);
         try {
-          await profileStore.saveActiveConfigToProfile();
+          await profileStore.projectActiveProfileToConfig();
         } catch (err: unknown) {
           const reason = err instanceof Error ? err.message : String(err);
           return {
             ok: false,
-            message: `Saved to active config but failed to snapshot profile: ${reason}`,
+            message: `Profile saved but failed to update active config: ${reason}`,
           };
         }
       } else {

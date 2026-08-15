@@ -42,8 +42,7 @@ describe('package.json command contributions', () => {
       'ohMyOpenAgent.editAgent',
       'ohMyOpenAgent.editCategory',
       'ohMyOpenAgent.refresh',
-      'ohMyOpenAgent.selectConfigScope',
-      'ohMyOpenAgent.selectRoutingDialect',
+      'ohMyOpenAgent.configureSettings',
       'ohMyOpenAgent.createProfile',
       'ohMyOpenAgent.createProfileFromConfig',
       'ohMyOpenAgent.activateProfile',
@@ -99,41 +98,28 @@ describe('package.json command contributions', () => {
     ]);
   });
 
-  it('exposes selectConfigScope in the Command Palette and view/title', () => {
+  it('exposes one settings command in the Command Palette and view title', () => {
     const manifest = readPackageJson();
     const commandPalette = manifest.contributes?.menus?.commandPalette ?? [];
     const viewTitle = manifest.contributes?.menus?.['view/title'] ?? [];
 
     expect(commandPalette.map(({ command }) => command)).not.toContain(
+      'ohMyOpenAgent.configureSettings',
+    );
+    expect(viewTitle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          command: 'ohMyOpenAgent.configureSettings',
+          when: 'view == ohMyOpenAgent.models',
+          group: 'navigation',
+        }),
+      ]),
+    );
+    expect(viewTitle.map(({ command }) => command)).not.toContain(
       'ohMyOpenAgent.selectConfigScope',
     );
-    expect(viewTitle).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          command: 'ohMyOpenAgent.selectConfigScope',
-          when: 'view == ohMyOpenAgent.models',
-          group: 'navigation',
-        }),
-      ]),
-    );
-  });
-
-  it('exposes selectRoutingDialect in the Command Palette and view/title', () => {
-    const manifest = readPackageJson();
-    const commandPalette = manifest.contributes?.menus?.commandPalette ?? [];
-    const viewTitle = manifest.contributes?.menus?.['view/title'] ?? [];
-
-    expect(commandPalette.map(({ command }) => command)).not.toContain(
+    expect(viewTitle.map(({ command }) => command)).not.toContain(
       'ohMyOpenAgent.selectRoutingDialect',
-    );
-    expect(viewTitle).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          command: 'ohMyOpenAgent.selectRoutingDialect',
-          when: 'view == ohMyOpenAgent.models',
-          group: 'navigation',
-        }),
-      ]),
     );
   });
 });

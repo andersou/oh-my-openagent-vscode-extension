@@ -16,15 +16,15 @@ The sidebar view shows your active config, all built-in agents and categories wi
 ## Features
 
 - **Agent and category model overrides**: see all 11 built-in agents and 8 built-in categories in a hierarchical tree. Edit any item in the webview form. Saving an edit to a built-in item creates its override. The tree renders labels like `sisyphus → opencode-go/kimi-k2.7-code` so you always know which model is assigned.
-- **Ordered model cards**: position 1 is **Main** and every later card is a fallback. Drag any fallback into position 1 to replace Main. The `Drag` handle explains this on hover and supports keyboard reordering: press Space or Enter to pick up, use Arrow Up or Arrow Down to move, press Space or Enter to drop, or Escape to cancel. Main settings are shared defaults for Main and for inherited fallback fields. Each fallback's Advanced controls let you choose `Inherit default` or `Override`; inherited properties are omitted when saved.
+- **Ordered model cards**: position 1 is **Main** and every later card is a fallback. Drag any fallback into position 1 to replace Main. The `Drag` handle explains this on hover and supports keyboard reordering: press Space or Enter to pick up, use Arrow Up or Arrow Down to move, press Space or Enter to drop, or Escape to cancel. Main settings are shared defaults. In each card's Advanced section, a blank select shows `Inherit (<default>)`, a selected value is an override, an empty numeric input inherits the value shown by its placeholder, and a populated numeric input is an override. Shared Temperature and Top-p defaults remain editable when a model reports no sampling support; that model's card inputs are disabled with an explanatory tooltip, and inherited values are not serialized as card overrides.
 - **Lazy model picker** — the Model field is populated asynchronously from the local `opencode models --verbose` CLI, with a free-form fallback when the CLI is unavailable. The discovered model IDs appear as autocomplete suggestions alongside each model's capabilities and variants. A reload button lets you re-run discovery at any time.
 - **JSONC preservation** — all writes go through `jsonc-parser` via a per-path diff engine. The `ConfigStore` compares the original and modified config recursively, then calls `modify()` on each changed JSON path individually. Comments, trailing commas, and formatting on untouched keys survive every edit.
-- **Profiles** — snapshot the current `agents` and `categories` sections into named profiles stored in a sidecar file (`omo.profiles.json`). Switch between them instantly with full JSONC preservation. Each profile can carry an optional description. Active profile is marked with a check icon and `(active)` label.
+- **Profiles** — canonical internal snapshots of the current `agents` and `categories`, stored in a sidecar file (`omo.profiles.json`). A profile remains the source of truth when activated: edits update the profile first and then project it to `omo.jsonc` using the selected harness and routing model. Each profile can carry an optional description. The active profile is marked with a check icon and `(active)` label.
 - **Profile import and export** — move individual profiles or your whole sidecar in and out as JSON or JSONC. Import a single `{ agents, categories }` fragment, or import a full `{ version: 1, profiles: [...] }` sidecar and choose whether to extend the existing list or replace it. Export one profile or every profile at once.
 - **JSON profile editing** — open a saved profile or the active config's `agents`/`categories` as JSON in an untitled editor, edit freely, and save to apply. Useful for bulk changes that the form editor does not expose.
-- **Selectable config scope** — choose whether the extension edits the shared base (`global`) or a harness block (`opencode`, `senpi`, `codex`) of `omo.jsonc`. The active scope is shown next to the config file in the sidebar, and switching scopes closes any open agent editor to prevent stale edits. Switching to `global` first reconciles `omo.jsonc`, because harness blocks would otherwise shadow every global edit.
+- **Selectable harness and routing model** — one settings flow sequentially selects the config scope (`global`, `opencode`, `senpi`, `codex`) and disk routing model (`latest`, `mainline`). Both selections appear side by side on the config item. Changing either selection reprojects the active profile; switching to `global` first reconciles `omo.jsonc`, because harness blocks would otherwise shadow every global edit.
 - **Sidebar integration** — the `Oh My OpenAgent` activity bar view puts everything one click away. Three collapsible groups (Agents, Categories, Profiles) with inline edit buttons, context menu actions, and tooltips that show configured parameters on hover.
-- **Commands where they belong**: `Open Agent Manager`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are available from the Command Palette and view title. Editing, override management, profile actions, and JSON editing appear only when their sidebar context applies.
+- **Commands where they belong**: `Open Agent Manager`, `Configure Harness and Routing Model`, `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` are available from the Command Palette and view title. Editing, override management, profile actions, and JSON editing appear only when their sidebar context applies.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ The extension can edit different parts of the unified `omo.jsonc` config. Choose
 - **`senpi`** — the `[senpi]` harness block. Only `agents` and `categories` are written here.
 - **`codex`** — the `[codex]` harness block. Only `agents` and `categories` are written here.
 
-Switch scopes with the `Oh My OpenAgent: Select Config Scope` command. It is available from the Command Palette and from the gear icon in the Models view title. The command shows the four scopes, marks the current one, and updates the active scope on selection.
+Choose the scope in the first step of `Oh My OpenAgent: Configure Harness and Routing Model`, available from the Command Palette and the Models view-title gear. The picker lists all four scopes and marks the current one before the routing-model step.
 
 ### Switching to the global scope
 
@@ -57,7 +57,7 @@ Both rewrites preserve comments and formatting. Cancelling the prompt leaves the
 
 Your choice is persisted as a `configScope` field inside the `omo.profiles.json` sidecar file, next to the user config. It is **not** stored as a VS Code setting. On activation the extension restores the persisted scope, falling back to `opencode` when none is saved.
 
-The sidebar tree root item shows the active scope next to the config file name (for example, `omo.jsonc` with description `opencode`). Switching scope closes any open agent editor and shows an information message, so you do not accidentally save edits into the wrong block.
+The sidebar config item shows both selections side by side (for example, `opencode · latest`). Switching scope closes any open agent editor and reports the change, so stale edits cannot be saved into the wrong block.
 
 The active scope controls all writes: agent/category editor saves, profile activation, and the active-profile JSON editor all target the selected scope. Project-layer reads still merge the shared base with the selected harness block; sibling harness blocks and base keys outside the selected scope are preserved untouched.
 
@@ -77,9 +77,9 @@ The extension can write agent and category routing to `omo.jsonc` in either of t
 - **`mainline`** — the omo ≥ 5.0.0 dialect. Writes one ordered `models` array per agent or category. The first entry is the main model merged with its overrides, and later entries are fallbacks. A reasoning-level `variant` is stored as `reasoning`.
 - **`latest`** — the omo 4.x stable dialect, and the default. In the `opencode` scope it writes `model` plus flattened top-level overrides plus `fallback_models`; in the `senpi` and `codex` scopes it writes the `models` array; in the `global` scope it writes model-only entries and drops fallback chains, with an editor warning when a chain cannot be represented.
 
-Select the dialect with the `Oh My OpenAgent: Select Disk Routing Dialect` command. It is available from the Command Palette and from the gear icon in the Models view title. The command shows the two dialects, marks the current one, and updates the active dialect on selection.
+Select both the harness and routing model with `Oh My OpenAgent: Configure Harness and Routing Model`, available from the Command Palette and the gear icon in the Models view title. The two sequential pickers mark their current values; the config item displays the result as `<harness> · <routing model>`.
 
-Your choice is persisted as a `routingDialect` field inside the `omo.profiles.json` sidecar file, next to the user config. It is **not** stored as a VS Code setting. On activation the extension restores the persisted dialect, falling back to `latest` when none is saved. Switching dialects rewrites deprecated routing keys on the next save, which is the migration path in either direction.
+The choices are persisted as `configScope` and `routingDialect` fields inside the `omo.profiles.json` sidecar file, next to the user config. They are **not** stored as VS Code settings. On activation the extension restores them, defaulting to `opencode` and `latest`. When an active profile exists, changing either choice immediately reprojects that unchanged internal profile to `omo.jsonc`; without an active profile, the choice applies on the next config write.
 
 ### Why two dialects?
 
@@ -145,11 +145,11 @@ The **Profiles** group always shows the active state: when no profile is active,
 ### Editing an agent or category
 
 1. Hover over the agent or category and click the pencil inline action, or right-click and choose `Edit Agent` / `Edit Category`. Both built-in items, existing override items, and profile-contained items can be edited.
-2. The webview editor opens with sections for Model, Sampling, Thinking, and Fallback models.
+2. The webview editor opens one ordered Model routing list plus shared Default generation settings.
 3. The cards form one ordered model list. Position 1 is **Main**, and later cards are fallbacks. Drag any fallback into position 1 to replace Main. Hover over a `Drag` handle for this reminder. For keyboard reordering, focus a handle, press Space or Enter to pick up, use Arrow Up or Arrow Down to move, press Space or Enter to drop, or Escape to cancel. There are no separate promotion or move controls.
 4. The main Model field is a free-form text input with a lazy datalist. While the editor loads, the extension runs `opencode models --verbose` locally and offers the returned model IDs as autocomplete suggestions, together with each model's capabilities and variants. Any existing model value is preserved, even if it is not in the discovered list.
-5. Edit Sampling and Thinking below the cards to set the shared defaults. They apply to Main and to every fallback field set to `Inherit default`. In a fallback's Advanced section, use `Override` for a model-specific value or `Inherit default` to use the shared value. Only explicit fallback overrides are written to that fallback entry.
-6. When a fallback becomes Main, its explicit overrides become the active shared defaults. Its `Inherit default` and `Override` choices remain attached to the model and return when it becomes a fallback again during the same editor session.
+5. The defaults section sets shared Reasoning effort, Thinking, Temperature, Top-p, and Max tokens values. `variant` and the legacy `reasoningEffort` field remain preserved in stored data but are not exposed as editable generation controls.
+6. Each card's Advanced section has one control per setting. For Reasoning effort and Thinking, the blank option reads `Inherit (<default>)`; selecting another option creates an override. For numeric settings, an empty input inherits the placeholder value and a populated input creates an override. Clearing a control returns it to inheritance.
 7. Hover over the reload button next to the Model field to re-run discovery and refresh the model list at any time. If discovered capabilities do not support an effective setting, including an inherited setting, the editor marks the conflict and blocks saving until you clear or change it.
 8. Use a fallback's **Remove** button to remove it. Removing the final fallback explicitly removes the fallback chain from the saved config.
 9. Change values and click **Save**. Saving a built-in agent or category creates its override in the active config. The sidebar refreshes after the JSONC-preserving write completes. Fields that are not exposed in the form, such as `permission`, `tools`, `prompt`, and `providerOptions`, are preserved rather than overwritten.
@@ -169,16 +169,16 @@ Right-click items in the Models view for more options:
 - On the active config file item: `Edit Active Profile JSON` opens the active config's `agents`/`categories` as JSON.
 - On the Profiles group header: `Create Profile from Config File…`, `Import Profiles`, or `Export All Profiles`.
 
-The view title also provides `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles` buttons.
+The view title also provides one `Configure Harness and Routing Model` settings button, plus `Refresh`, `Create Profile`, `Import Profiles`, and `Export All Profiles`.
 
 ## Commands
 
-The extension contributes 17 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Select Config Scope`, `Refresh`, `Create Profile`, `Create Profile from Config File…`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
+The extension contributes 17 commands. All are prefixed with **Oh My OpenAgent**. `Open Agent Manager`, `Configure Harness and Routing Model`, `Refresh`, `Create Profile`, `Create Profile from Config File…`, `Import Profiles`, and `Export All Profiles` are visible in the Command Palette and view title. The remaining commands are contextual sidebar actions.
 
 | Command | Availability | What it does |
 | --- | --- | --- |
 | `Open Agent Manager` | Command Palette | Focuses the `Oh My OpenAgent` sidebar view. |
-| `Select Config Scope` | Command Palette and view title | Opens a quick pick to choose the active config scope (`global`, `opencode`, `senpi`, `codex`). Command id: `ohMyOpenAgent.selectConfigScope`. |
+| `Configure Harness and Routing Model` | Command Palette and view title | Sequentially selects the active harness (`global`, `opencode`, `senpi`, `codex`) and routing model (`latest`, `mainline`). The config item shows both selections side by side. Command id: `ohMyOpenAgent.configureSettings`. |
 | `Edit Agent` | Contextual | Opens the editor for the selected agent. |
 | `Edit Category` | Contextual | Opens the editor for the selected category. |
 | `Refresh` | Command Palette and view title | Refreshes the Models tree from disk. |
@@ -317,12 +317,12 @@ extension.ts  (activation orchestrator)
 ### Key design decisions
 
 - **ConfigStore is pure Node.js** — zero VS Code dependency, making it testable in isolation with vitest. File watching uses `fs.watch` with 150 ms debounce and a `suppressWatch` flag to ignore self-triggered events during atomic writes.
-- **Routing conversion at the disk boundary** — the editor and saved profiles keep the internal routing shape (`model`, `main_overrides`, `fallback_models`). The extension supports two on-disk routing dialects selected by a routing dialect flag: `mainline` (omo ≥ 5.0.0) writes one ordered `models` array whose first entry is the main model merged with its overrides, with `reasoning` replacing a reasoning-level `variant`; `latest` (omo 4.x stable, the default) writes `model` + flattened top-level overrides + `fallback_models` in the opencode scope, the `models` array in the senpi/codex scopes, and model-only entries (chains dropped, with an editor warning) in the global scope; reads accept both dialects and deprecated keys are rewritten to the active dialect on the next write. `routingConversion.ts` holds both directions; `ConfigStore` converts on every read and every write. A provider/model `variant` is left alone.
+- **Profiles are canonical; routing is a projection** — the editor and every saved profile keep the internal routing shape (`model`, `main_overrides`, `fallback_models`). `ProfileStore` canonicalizes public inputs before every sidecar write. Comparisons project both the profile and live config through the selected harness/routing model first, so equivalent shapes do not appear modified. `mainline` (omo ≥ 5.0.0) writes one ordered `models` array whose first entry is the main model merged with its overrides; `latest` (omo 4.x stable, the default) writes `model` plus flattened overrides and scope-dependent fallback routing. `routingConversion.ts` owns both directions, and `ConfigStore` converts at the `omo.jsonc` boundary.
 - **Atomic writes everywhere** — both `ConfigStore` and `ProfileStore` write via temp-file + `fs.renameSync`, guaranteeing no partial content even on crash.
 - **Per-path JSONC diffing** — `updateConfig()` deep-clones the parsed config, runs the updater callback, then `diffConfigs()` recursively compares original and draft. Each changed JSON path gets its own `jsonc-parser` `modify()` call, so comments and formatting on untouched keys are never disturbed.
 - **Webview security** — strict CSP with `default-src 'none'`, per-render nonces via `crypto.randomBytes(16)`, local resource roots restricted to `out/` only, and all DOM text insertion uses `.textContent` (never `innerHTML`).
 - **Singleton editor panel** — `AgentEditorPanel` uses a static `currentPanel` reference to prevent multiple webview instances. Panel state survives tab switches via `retainContextWhenHidden: true`.
-- **Sidecar profiles and config scope** — profiles are stored in a separate plain JSON file (`omo.profiles.json`) so the main OmO config stays schema-clean. Profile activation writes into the active scope of the main config through the JSONC-preserving `ConfigStore.updateConfig()` path. The chosen scope is persisted in the sidecar's `configScope` field and restored on activation.
+- **Sidecar profiles and config projection** — profiles are stored in `omo.profiles.json` so the main OmO config stays schema-clean. Activation and active-profile edits project the saved profile through the JSONC-preserving `ConfigStore.updateConfig()` path without mutating the profile for the selected routing model. The chosen harness and routing model are persisted in the sidecar and restored on activation.
 - **Transfer canonical JSON** — export serializes only JSON-safe values (null, booleans, finite numbers, strings, dense arrays, and plain objects), sorts keys, and appends a trailing newline. This prevents accidental disclosure of getters, symbols, or cyclic structures.
 - **Profile JSON editor host** — `profileJsonEditorHost.ts` isolates the active/saved target protocol from the UI, while `ProfileJsonEditor.svelte` provides a focused textarea with save, dirty tracking, and error display.
 - **Scope-aware writes** — `ConfigStore` carries a `ConfigScope` value (`global`, `opencode`, `senpi`, or `codex`). Reads merge the shared base with the selected harness block; writes prefix each JSONC patch with the matching harness block or target the root for `global`. The active scope is saved to and restored from `omo.profiles.json` via `ProfileStore`, so the same scope is active across extension restarts without touching VS Code settings.
@@ -378,10 +378,10 @@ Tests are written with Vitest. The suite covers the extension's main behaviors:
 | `packageMenus.test.ts` | The 17-command contribution surface and contextual menu visibility |
 | `configStore.test.ts` | Config discovery, JSONC parsing, formatting-preserving updates, key removal, and file watching |
 | `routingConversion.test.ts` | Internal ↔ public routing conversion for both dialects: `models` chains, `model`/`fallback_models` chains, main overrides, reasoning-style variants, precedence, and idempotency |
-| `routingBoundary.test.ts` | End-to-end routing dialect at the disk boundary: `mainline` and `latest` writes, legacy profile activation, on-disk migration, inverse reads, snapshots, and JSON-editor saves |
+| `routingBoundary.test.ts` | End-to-end routing projection at the disk boundary: one canonical profile across `mainline`/`latest`, scope-specific hidden routing, legacy activation, inverse reads, snapshots, and JSON-editor saves |
 | `modelRouting.test.ts` | Ordered-card promotion, shared defaults, fallback inheritance and overrides, serialization, removal, and session-bound routing intent |
-| `modelCapabilities.test.ts` | Capability validation for effective inherited and overridden settings |
-| `webview.test.ts` | Model picker behavior, ordered-list editor integration, drag promotion, fallback editing, profile JSON editor UI, and persisted state |
+| `modelCapabilities.test.ts` | Capability validation for explicit card overrides, including inherited sampling defaults that unsupported models do not serialize as overrides |
+| `webview.test.ts` | Model picker behavior, simplified inherit/override controls, legacy-field preservation, drag promotion, fallback editing, profile JSON editor UI, and persisted state |
 | `editorPayloadValidation.test.ts` | Structured-editor allow-lists for agent and category save payloads |
 | `reorder.test.ts` | Fallback list reordering via drag and keyboard |
 | `schema.test.ts` | Profile schema contract and shape invariants |

@@ -368,6 +368,28 @@ describe('ProfileStore', () => {
       expect(onDisk.profiles[0].description).toBe('new desc');
     });
 
+    it('canonicalizes a public routing chain before persisting a profile patch', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('canonical');
+
+      const updated = await profileStore.updateProfile('canonical', {
+        agents: {
+          sisyphus: {
+            models: [{ model: 'a/one', temperature: 0.3 }, 'b/two'],
+          },
+        },
+      });
+
+      expect(updated.agents?.sisyphus).toEqual({
+        model: 'a/one',
+        main_overrides: { temperature: 0.3 },
+        fallback_models: ['b/two'],
+      });
+      expect(readSidecar(sidecarPath).profiles[0].agents.sisyphus).toEqual(
+        updated.agents?.sisyphus,
+      );
+    });
+
     it('throws when the profile does not exist', async () => {
       setupWithConfig(CONFIG_MINIMAL);
 
@@ -422,6 +444,30 @@ describe('ProfileStore', () => {
         prompt: 'keep this prompt',
         tools: { read: true },
       });
+    });
+
+    it('canonicalizes a public routing chain merged through the entry editor', async () => {
+      setupWithConfig(CONFIG_MINIMAL);
+      await profileStore.createProfile('canonical-entry');
+
+      const updated = await profileStore.updateProfileEntry(
+        'canonical-entry',
+        'agents',
+        'sisyphus',
+        {
+          models: [{ model: 'a/one', reasoning: 'high' }, 'b/two'],
+        },
+        new Set(),
+      );
+
+      expect(updated.agents?.sisyphus).toEqual({
+        model: 'a/one',
+        main_overrides: { reasoning: 'high' },
+        fallback_models: ['b/two'],
+      });
+      expect(
+        readSidecar(sidecarPath).profiles[0].agents.sisyphus,
+      ).toEqual(updated.agents?.sisyphus);
     });
 
     it('deletes null-key fields after merging an entry patch', async () => {
@@ -1859,6 +1905,7 @@ describe('ProfileStore', () => {
         'utf-8',
       );
       createStores();
+      configStore.setRoutingDialect('latest');
 
       // When/Then: equal semantics, so no modification is reported
       expect(profileStore.getActiveProfileModifications()).toEqual([]);
@@ -1904,6 +1951,7 @@ describe('ProfileStore', () => {
         'utf-8',
       );
       createStores();
+      configStore.setRoutingDialect('latest');
 
       // When/Then: the folded override reports the underlying field, not main_overrides
       expect(profileStore.getActiveProfileModifications()).toEqual([

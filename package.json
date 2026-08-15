@@ -60,14 +60,8 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "ohMyOpenAgent.selectConfigScope",
-        "title": "Select Config Scope",
-        "category": "Oh My OpenAgent",
-        "icon": "$(settings-gear)"
-      },
-      {
-        "command": "ohMyOpenAgent.selectRoutingDialect",
-        "title": "Select Disk Routing Dialect",
+        "command": "ohMyOpenAgent.configureSettings",
+        "title": "Configure Harness and Routing Model",
         "category": "Oh My OpenAgent",
         "icon": "$(settings-gear)"
       },
@@ -252,12 +246,7 @@
           "group": "navigation"
         },
         {
-          "command": "ohMyOpenAgent.selectConfigScope",
-          "when": "view == ohMyOpenAgent.models",
-          "group": "navigation"
-        },
-        {
-          "command": "ohMyOpenAgent.selectRoutingDialect",
+          "command": "ohMyOpenAgent.configureSettings",
           "when": "view == ohMyOpenAgent.models",
           "group": "navigation"
         },

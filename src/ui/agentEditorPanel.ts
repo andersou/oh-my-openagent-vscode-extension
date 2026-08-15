@@ -631,6 +631,18 @@ export class AgentEditorPanel implements vscode.Disposable {
     }
   }
 
+  private async _projectSavedActiveProfile(): Promise<void> {
+    try {
+      await this._profileStore.projectActiveProfileToConfig();
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Profile saved but failed to update active config: ${reason}`,
+        { cause: err },
+      );
+    }
+  }
+
   private async _handleSave(
     rawPayload: unknown,
     target: VersionedTarget | undefined,
@@ -665,17 +677,7 @@ export class AgentEditorPanel implements vscode.Disposable {
             await this._warnIfGlobalLatestWithFallbacks(
               validated as Record<string, unknown>,
             );
-            await this._configStore.updateConfig((draft) => {
-              if (!draft.agents) {
-                draft.agents = {};
-              }
-              const existing = draft.agents[agentName] ?? {};
-              draft.agents[agentName] = { ...existing, ...validated };
-              for (const key of nullKeys) {
-                delete (draft.agents[agentName] as Record<string, unknown>)[key];
-              }
-            });
-            await this._profileStore.saveActiveConfigToProfile();
+            await this._projectSavedActiveProfile();
           }
         } else {
           await this._warnIfGlobalLatestWithFallbacks(
@@ -710,17 +712,7 @@ export class AgentEditorPanel implements vscode.Disposable {
             await this._warnIfGlobalLatestWithFallbacks(
               validated as Record<string, unknown>,
             );
-            await this._configStore.updateConfig((draft) => {
-              if (!draft.categories) {
-                draft.categories = {};
-              }
-              const existing = draft.categories[categoryName] ?? {};
-              draft.categories[categoryName] = { ...existing, ...validated };
-              for (const key of nullKeys) {
-                delete (draft.categories[categoryName] as Record<string, unknown>)[key];
-              }
-            });
-            await this._profileStore.saveActiveConfigToProfile();
+            await this._projectSavedActiveProfile();
           }
         } else {
           await this._warnIfGlobalLatestWithFallbacks(

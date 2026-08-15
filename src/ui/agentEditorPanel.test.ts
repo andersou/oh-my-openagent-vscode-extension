@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // vscode mock — must be set up before importing the panel module.
@@ -765,10 +766,12 @@ function makeMockConfigStore(): ConfigStore {
   } as unknown as ConfigStore;
 }
 
-function makeProfileAwareConfigStore(): ConfigStore & {
-  readonly getAgentMock: ReturnType<typeof vi.fn>;
-  readonly updateConfigMock: ReturnType<typeof vi.fn>;
-} {
+type ProfileAwareConfigStore = ConfigStore & {
+  readonly getAgentMock: Mock;
+  readonly updateConfigMock: Mock;
+};
+
+function makeProfileAwareConfigStore(): ProfileAwareConfigStore {
   const getAgentMock = vi.fn(() => ({ model: 'active-config/model' }));
   const updateConfigMock = vi.fn(async () => {});
   return {
@@ -780,16 +783,18 @@ function makeProfileAwareConfigStore(): ConfigStore & {
     updateConfig: updateConfigMock,
     getAgentMock,
     updateConfigMock,
-  } as unknown as ConfigStore & {
-    readonly getAgentMock: ReturnType<typeof vi.fn>;
-    readonly updateConfigMock: ReturnType<typeof vi.fn>;
-  };
+  } as unknown as ProfileAwareConfigStore;
 }
 
-function makeProfileAwareProfileStore(): ProfileStore & {
-  readonly getProfileMock: ReturnType<typeof vi.fn>;
-  readonly updateProfileEntryMock: ReturnType<typeof vi.fn>;
-} {
+type ProfileAwareProfileStore = ProfileStore & {
+  readonly getProfileMock: Mock;
+  readonly updateProfileEntryMock: Mock;
+  readonly projectActiveProfileToConfigMock: Mock;
+};
+
+function makeProfileAwareProfileStore(
+  active?: string,
+): ProfileAwareProfileStore {
   const getProfileMock = vi.fn((name: string) =>
     name === 'fast'
       ? {
@@ -804,18 +809,18 @@ function makeProfileAwareProfileStore(): ProfileStore & {
       : undefined,
   );
   const updateProfileEntryMock = vi.fn(async () => ({ name: 'fast' }));
+  const projectActiveProfileToConfigMock = vi.fn(async () => true);
   return {
     onDidChange: new EventEmitter(),
     listProfiles: () => [],
-    getActiveProfileName: () => undefined,
+    getActiveProfileName: () => active,
     getProfile: getProfileMock,
     updateProfileEntry: updateProfileEntryMock,
+    projectActiveProfileToConfig: projectActiveProfileToConfigMock,
     getProfileMock,
     updateProfileEntryMock,
-  } as unknown as ProfileStore & {
-    readonly getProfileMock: ReturnType<typeof vi.fn>;
-    readonly updateProfileEntryMock: ReturnType<typeof vi.fn>;
-  };
+    projectActiveProfileToConfigMock,
+  } as unknown as ProfileAwareProfileStore;
 }
 
 function makeMockProfileStore(): ProfileStore {
@@ -863,6 +868,12 @@ describe('AgentEditorPanel integration', () => {
     const configStore = makeMockConfigStore();
     const profileStore = makeMockProfileStore();
     const modelDiscovery = makeMockModelDiscovery();
+    vi.mocked(modelDiscovery.discoverModels).mockImplementation(async (options = {}) => ({
+      models: options.verbose
+        ? [{ modelId: 'opencode/big-pickle', capabilities: { temperature: true, reasoning: true } }]
+        : [{ modelId: 'opencode/big-pickle' }],
+      source: 'cli',
+    }));
     const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
 
     vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as unknown as import('vscode').WebviewPanel);
@@ -883,10 +894,19 @@ describe('AgentEditorPanel integration', () => {
     expect(vi.mocked(modelDiscovery.discoverModels)).toHaveBeenCalledWith({ verbose: true, forceRefresh: false });
 
     const loadedMessages = messages.filter(
-      (m): m is { command: string; models: Array<{ modelId: string }> } =>
+      (m): m is {
+        command: string;
+        models: Array<{ modelId: string; capabilities?: { temperature?: boolean } }>;
+      } =>
         typeof m === 'object' && m !== null && (m as { command?: unknown }).command === 'modelsLoaded',
     );
-    expect(loadedMessages.length).toBeGreaterThanOrEqual(1);
+    expect(loadedMessages).toContainEqual({
+      command: 'modelsLoaded',
+      models: [{
+        modelId: 'opencode/big-pickle',
+        capabilities: { temperature: true, reasoning: true },
+      }],
+    });
   });
 
   it('forces refresh when reloadModels is received', async () => {
@@ -991,6 +1011,53 @@ describe('AgentEditorPanel integration', () => {
     );
     expect(configStore.updateConfigMock).not.toHaveBeenCalled();
     expect(messages).toContainEqual({
+      command: 'saved',
+      target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    });
+  });
+
+  it('reports when an active profile saves but its config projection fails', async () => {
+    const { panel, listeners, messages } = makeMockWebviewPanel();
+    const configStore = makeProfileAwareConfigStore();
+    const profileStore = makeProfileAwareProfileStore('fast');
+    profileStore.projectActiveProfileToConfigMock.mockRejectedValueOnce(
+      new Error('config locked'),
+    );
+    const modelDiscovery = makeMockModelDiscovery();
+    const treeProvider = new AgentModelTreeProvider(configStore, profileStore);
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(
+      panel as unknown as import('vscode').WebviewPanel,
+    );
+
+    AgentEditorPanel.show(
+      makeExtensionContext(extensionPath),
+      configStore,
+      profileStore,
+      modelDiscovery,
+      treeProvider,
+      { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    );
+
+    for (const listener of listeners) {
+      listener({
+        command: 'save',
+        target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+        payload: { model: 'profile/new' },
+      });
+    }
+    const handled = Promise.withResolvers<void>();
+    setImmediate(handled.resolve);
+    await handled.promise;
+
+    expect(profileStore.updateProfileEntryMock).toHaveBeenCalledOnce();
+    expect(profileStore.projectActiveProfileToConfigMock).toHaveBeenCalledOnce();
+    expect(messages).toContainEqual({
+      command: 'error',
+      message:
+        'Profile saved but failed to update active config: config locked',
+      target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
+    });
+    expect(messages).not.toContainEqual({
       command: 'saved',
       target: { type: 'agent', name: 'sisyphus', profile: 'fast' },
     });

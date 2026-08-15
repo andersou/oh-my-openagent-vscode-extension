@@ -299,18 +299,23 @@ describe('webview lazy model picker (end-to-end)', () => {
     await window.happyDOM.waitUntilComplete();
 
     const temperatureInput = document.getElementById('f-temperature') as HTMLInputElement;
-    expect(temperatureInput.disabled).toBe(true);
-    expect(temperatureInput.title).toContain('temperature');
+    expect(temperatureInput.disabled).toBe(false);
+    expect(temperatureInput.title).toBe('');
+    const mainCard = document.querySelector('[data-model-position="main"]');
+    const temperatureOverride = mainCard?.querySelector<HTMLInputElement>('input[name="temperature-override"]');
+    const topPOverride = mainCard?.querySelector<HTMLInputElement>('input[name="top_p-override"]');
+    expect(temperatureOverride?.disabled).toBe(true);
+    expect(topPOverride?.disabled).toBe(true);
+    expect(temperatureOverride?.title).toBe('This model does not support sampling controls.');
+    expect(topPOverride?.title).toBe('This model does not support sampling controls.');
 
-    const reasoningSelect = document.getElementById('f-reasoning') as HTMLSelectElement;
+    const reasoningSelect = document.getElementById('f-new-reasoning') as HTMLSelectElement;
     expect(reasoningSelect.disabled).toBe(false);
-
-    const variantSelect = document.getElementById('f-variant') as HTMLSelectElement;
-    const variantOptions = Array.from(variantSelect.options).map((o) => o.value);
-    expect(variantOptions).toContain('low');
+    expect(document.getElementById('f-variant')).toBeNull();
+    expect(document.getElementById('f-reasoning')).toBeNull();
   });
 
-  it('enables inputs when the model supports the capability', async () => {
+  it('enables card sampling inputs when real model metadata reports temperature support', async () => {
     const { window } = env;
     const document = window.document;
 
@@ -318,7 +323,7 @@ describe('webview lazy model picker (end-to-end)', () => {
       command: 'init',
       type: 'agent',
       name: 'sisyphus',
-      config: { model: 'full/model' },
+      config: { model: 'opencode/big-pickle' },
     });
     await window.happyDOM.waitUntilComplete();
 
@@ -326,15 +331,20 @@ describe('webview lazy model picker (end-to-end)', () => {
       command: 'modelsLoaded',
       models: [
         {
-          modelId: 'full/model',
+          modelId: 'opencode/big-pickle',
           capabilities: { temperature: true, reasoning: true },
         },
       ],
     });
     await window.happyDOM.waitUntilComplete();
 
-    const temperatureInput = document.getElementById('f-temperature') as HTMLInputElement;
-    expect(temperatureInput.disabled).toBe(false);
+    const mainCard = document.querySelector('[data-model-position="main"]');
+    const temperatureOverride = mainCard?.querySelector<HTMLInputElement>('input[name="temperature-override"]');
+    const topPOverride = mainCard?.querySelector<HTMLInputElement>('input[name="top_p-override"]');
+    expect(temperatureOverride?.disabled).toBe(false);
+    expect(topPOverride?.disabled).toBe(false);
+    expect(temperatureOverride?.title).toBe('');
+    expect(topPOverride?.title).toBe('');
   });
 
   it('adds a fallback card when the Add button is clicked', async () => {
@@ -764,7 +774,7 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(saveMessage?.payload.reasoning).toBe('high');
   });
 
-  it('populates reasoning options from verbose metadata variants', async () => {
+  it('keeps the modern reasoning options independent from legacy variant metadata', async () => {
     const { window } = env;
     window.postMessage({
       command: 'init',
@@ -789,69 +799,44 @@ describe('webview lazy model picker (end-to-end)', () => {
     });
     await window.happyDOM.waitUntilComplete();
 
-    const reasoningSelect = window.document.getElementById('f-reasoning') as HTMLSelectElement;
-    const values = Array.from(reasoningSelect.options).map((o) => o.value);
-    expect(values).toContain('low');
-    expect(values).toContain('max');
-
-    const variantSelect = window.document.getElementById('f-variant') as HTMLSelectElement;
-    const variantValues = Array.from(variantSelect.options).map((o) => o.value);
-    expect(variantValues).toContain('low');
-    expect(variantValues).toContain('max');
+    const reasoningSelect = window.document.getElementById('f-new-reasoning') as HTMLSelectElement;
+    expect(Array.from(reasoningSelect.options).map((option) => option.value)).toEqual([
+      '',
+      'off',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'auto',
+    ]);
+    expect(window.document.getElementById('f-variant')).toBeNull();
+    expect(window.document.getElementById('f-reasoning')).toBeNull();
   });
 
-  it('shows only the default variant when the model has no variants', async () => {
+  it('does not render removed variant or legacy reasoning controls in defaults or cards', async () => {
     const { window } = env;
     window.postMessage({
       command: 'init',
       type: 'agent',
       name: 'sisyphus',
-      config: { model: 'kimi-k2.6' },
+      config: {
+        model: 'legacy/model',
+        variant: 'fast',
+        reasoningEffort: 'high',
+      },
     });
     await window.happyDOM.waitUntilComplete();
 
-    window.postMessage({
-      command: 'modelsLoaded',
-      models: [
-        {
-          modelId: 'kimi-k2.6',
-          capabilities: { temperature: true, reasoning: true },
-          variants: {},
-        },
-      ],
-    });
-    await window.happyDOM.waitUntilComplete();
-
-    const variantSelect = window.document.getElementById('f-variant') as HTMLSelectElement;
-    const variantValues = Array.from(variantSelect.options).map((o) => o.value);
-    expect(variantValues).toEqual(['']);
+    expect(window.document.getElementById('f-variant')).toBeNull();
+    expect(window.document.getElementById('f-reasoning')).toBeNull();
+    const main = window.document.querySelector('[data-model-position="main"]');
+    expect(main?.querySelector('[name="variant-mode"]')).toBeNull();
+    expect(main?.querySelector('[name="reasoningEffort-mode"]')).toBeNull();
+    expect(main?.textContent).not.toContain('Reasoning effort (legacy)');
   });
 
-  it('shows only the default variant when the model metadata has no variants field', async () => {
-    const { window } = env;
-    window.postMessage({
-      command: 'init',
-      type: 'agent',
-      name: 'sisyphus',
-      config: { model: 'no-variants/model' },
-    });
-    await window.happyDOM.waitUntilComplete();
-
-    window.postMessage({
-      command: 'modelsLoaded',
-      models: [
-        {
-          modelId: 'no-variants/model',
-          capabilities: { temperature: true, reasoning: true },
-        },
-      ],
-    });
-    await window.happyDOM.waitUntilComplete();
-
-    const variantSelect = window.document.getElementById('f-variant') as HTMLSelectElement;
-    const variantValues = Array.from(variantSelect.options).map((o) => o.value);
-    expect(variantValues).toEqual(['']);
-  });
 
   it('renders every configured model in one semantic ordered list with accessible promotion guidance', async () => {
     const { window } = env;
@@ -885,10 +870,11 @@ describe('webview lazy model picker (end-to-end)', () => {
     });
     await window.happyDOM.waitUntilComplete();
 
-    const inheritMode = window.document.querySelector<HTMLSelectElement>(
-      '[data-model-position="fallback-1"] select[name="temperature-mode"]',
+    const inheritedTemperature = window.document.querySelector<HTMLInputElement>(
+      '[data-model-position="fallback-1"] input[name="temperature-override"]',
     );
-    expect(inheritMode?.value).toBe('inherit');
+    expect(inheritedTemperature?.value).toBe('');
+    expect(inheritedTemperature?.placeholder).toBe('0.4');
 
     const removeButton = window.document.querySelector<HTMLButtonElement>(
       '[data-model-position="fallback-1"] .model-card__remove',
@@ -911,23 +897,49 @@ describe('webview lazy model picker (end-to-end)', () => {
     expect(saveMessage?.payload.fallback_models).toBeNull();
   });
 
-  it('renders advanced inherit and override controls for Main without a remove action', async () => {
+  it('renders one inferred control per advanced setting without a remove action on Main', async () => {
     const { window } = env;
     window.postMessage({
       command: 'init',
       type: 'agent',
       name: 'sisyphus',
-      config: { model: 'main/model', temperature: 0.7 },
+      config: {
+        model: 'main/model',
+        reasoning: 'high',
+        thinking: { type: 'enabled', budgetTokens: 2048 },
+        temperature: 0.7,
+      },
     });
     await window.happyDOM.waitUntilComplete();
 
     const main = window.document.querySelector('[data-model-position="main"]');
     expect(main?.querySelector('details.model-card__advanced')).not.toBeNull();
-    expect(main?.querySelector<HTMLSelectElement>('select[name="temperature-mode"]')?.value).toBe('inherit');
+    const reasoning = main?.querySelector<HTMLSelectElement>(
+      'select[name="reasoning-override"]',
+    );
+    expect(reasoning?.value).toBe('');
+    expect(reasoning?.options[0]?.textContent).toBe('Inherit (high)');
+    const thinking = main?.querySelector<HTMLSelectElement>(
+      'select[name="thinking-override"]',
+    );
+    expect(thinking?.options[0]?.textContent).toBe('Inherit (Enabled)');
+    if (!thinking) throw new Error('Thinking control did not render');
+    thinking.value = 'enabled';
+    thinking.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+    expect(
+      main?.querySelector<HTMLInputElement>('[aria-label="Thinking budget tokens"]')?.value,
+    ).toBe('2048');
+    const temperature = main?.querySelector<HTMLInputElement>(
+      'input[name="temperature-override"]',
+    );
+    expect(temperature?.value).toBe('');
+    expect(temperature?.placeholder).toBe('0.7');
+    expect(main?.querySelector('[name="temperature-mode"]')).toBeNull();
     expect(main?.querySelector('.model-card__remove')).toBeNull();
   });
 
-  it('shows defaults while any card setting inherits and hides them when every setting is explicit', async () => {
+  it('infers inherit or override from each simplified advanced control', async () => {
     const { window } = env;
     window.postMessage({
       command: 'init',
@@ -939,26 +951,96 @@ describe('webview lazy model picker (end-to-end)', () => {
 
     expect(window.document.querySelector('[data-section="defaults"]')).not.toBeNull();
 
-    for (const name of ['variant-mode', 'reasoning-mode', 'reasoningEffort-mode', 'temperature-mode', 'top_p-mode', 'maxTokens-mode', 'thinking-mode']) {
-      const mode = window.document.querySelector<HTMLSelectElement>(`[data-model-position="main"] select[name="${name}"]`);
-      expect(mode).not.toBeNull();
-      if (!mode) throw new Error(`${name} control did not render`);
-      mode.value = 'override';
-      mode.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const mainSelector = '[data-model-position="main"]';
+    const reasoning = window.document.querySelector<HTMLSelectElement>(
+      `${mainSelector} select[name="reasoning-override"]`,
+    );
+    const thinking = window.document.querySelector<HTMLSelectElement>(
+      `${mainSelector} select[name="thinking-override"]`,
+    );
+    if (!reasoning || !thinking) throw new Error('Advanced selects did not render');
+    reasoning.value = 'high';
+    reasoning.dispatchEvent(new window.Event('change', { bubbles: true }));
+    thinking.value = 'disabled';
+    thinking.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+    for (const [name, value] of [
+      ['temperature-override', '0.4'],
+      ['top_p-override', '0.8'],
+      ['maxTokens-override', '100'],
+    ]) {
+      const input = window.document.querySelector<HTMLInputElement>(
+        `${mainSelector} input[name="${name}"]`,
+      );
+      if (!input) throw new Error(`${name} control did not render`);
+      input.value = value;
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
     }
     await window.happyDOM.waitUntilComplete();
 
     expect(window.document.querySelector('[data-section="defaults"]')).toBeNull();
 
-    const temperatureMode = window.document.querySelector<HTMLSelectElement>(
-      '[data-model-position="main"] select[name="temperature-mode"]',
+    const temperature = window.document.querySelector<HTMLInputElement>(
+      `${mainSelector} input[name="temperature-override"]`,
     );
-    if (!temperatureMode) throw new Error('Temperature mode control did not render');
-    temperatureMode.value = 'inherit';
-    temperatureMode.dispatchEvent(new window.Event('change', { bubbles: true }));
+    if (!temperature) throw new Error('Temperature control did not render');
+    temperature.value = '';
+    temperature.dispatchEvent(new window.Event('input', { bubbles: true }));
     await window.happyDOM.waitUntilComplete();
 
     expect(window.document.querySelector('[data-section="defaults"]')).not.toBeNull();
+  });
+
+  it('serializes values selected directly in the simplified fallback controls', async () => {
+    const { window, messages } = env;
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: {
+        model: 'main/model',
+        reasoning: 'high',
+        temperature: 0.4,
+        fallback_models: ['fallback/model'],
+      },
+    });
+    await window.happyDOM.waitUntilComplete();
+
+    const fallbackSelector = '[data-model-position="fallback-1"]';
+    const reasoning = window.document.querySelector<HTMLSelectElement>(
+      `${fallbackSelector} select[name="reasoning-override"]`,
+    );
+    const temperature = window.document.querySelector<HTMLInputElement>(
+      `${fallbackSelector} input[name="temperature-override"]`,
+    );
+    if (!reasoning || !temperature) throw new Error('Fallback controls did not render');
+    expect(reasoning.options[0]?.textContent).toBe('Inherit (high)');
+    reasoning.value = 'low';
+    reasoning.dispatchEvent(new window.Event('change', { bubbles: true }));
+    temperature.value = '0.2';
+    temperature.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.happyDOM.waitUntilComplete();
+
+    (window.document.getElementById('btn-save') as HTMLButtonElement).click();
+    await window.happyDOM.waitUntilComplete();
+
+    const saveMessage = messages.find(
+      (message): message is {
+        command: 'save';
+        payload: { fallback_models?: unknown };
+      } =>
+        typeof message === 'object' &&
+        message !== null &&
+        'command' in message &&
+        message.command === 'save',
+    );
+    expect(saveMessage?.payload.fallback_models).toEqual([
+      {
+        model: 'fallback/model',
+        reasoning: 'low',
+        temperature: 0.2,
+      },
+    ]);
   });
 
   it('announces that promotion preserves model settings and shared defaults', async () => {
@@ -1005,20 +1087,20 @@ describe('webview lazy model picker (end-to-end)', () => {
     });
   });
 
-  it('restores dirty routing modes and ignores the matching host init', async () => {
+  it('restores dirty inferred overrides and ignores the matching host init', async () => {
     const { window, states } = env;
     window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'main', fallback_models: ['fallback'] } });
     await window.happyDOM.waitUntilComplete();
-    const mode = window.document.querySelector<HTMLSelectElement>('[data-model-position="fallback-1"] select[name="temperature-mode"]');
-    if (!mode) throw new Error('Temperature mode did not render');
-    mode.value = 'override';
-    mode.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const temperature = window.document.querySelector<HTMLInputElement>('[data-model-position="fallback-1"] input[name="temperature-override"]');
+    if (!temperature) throw new Error('Temperature control did not render');
+    temperature.value = '0.2';
+    temperature.dispatchEvent(new window.Event('input', { bubbles: true }));
     await window.happyDOM.waitUntilComplete();
     const savedState = states.at(-1);
     const restored = await createWebviewWindow(savedState);
     restored.window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'host', fallback_models: [] } });
     await restored.window.happyDOM.waitUntilComplete();
-    expect(restored.window.document.querySelector<HTMLSelectElement>('[data-model-position="fallback-1"] select[name="temperature-mode"]')?.value).toBe('override');
+    expect(restored.window.document.querySelector<HTMLInputElement>('[data-model-position="fallback-1"] input[name="temperature-override"]')?.value).toBe('0.2');
     await restored.window.happyDOM.close();
   });
 
@@ -1036,22 +1118,47 @@ describe('webview lazy model picker (end-to-end)', () => {
     promote('[data-model-position="fallback-1"]');
     await window.happyDOM.waitUntilComplete();
     const fallback = window.document.querySelector('[data-model-position="fallback-1"]');
-    expect(fallback?.querySelector<HTMLSelectElement>('select[name="temperature-mode"]')?.value).toBe('override');
-    expect(fallback?.querySelector<HTMLSelectElement>('select[name="top_p-mode"]')?.value).toBe('inherit');
+    expect(fallback?.querySelector<HTMLInputElement>('input[name="temperature-override"]')?.value).toBe('0.2');
+    expect(fallback?.querySelector<HTMLInputElement>('input[name="top_p-override"]')?.value).toBe('');
+    expect(fallback?.querySelector<HTMLInputElement>('input[name="top_p-override"]')?.placeholder).toBe('0.8');
   });
 
-  it('keeps unsupported configured defaults operable so they can be cleared before save', async () => {
+  it('saves unsupported sampling defaults without creating card overrides', async () => {
     const { window, messages } = env;
-    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'no-temp', temperature: 0.4 } });
-    window.postMessage({ command: 'modelsLoaded', models: [{ modelId: 'no-temp', capabilities: { temperature: false } }] });
+    window.postMessage({
+      command: 'init',
+      type: 'agent',
+      name: 'sisyphus',
+      config: { model: 'no-sampling', temperature: 0.4, top_p: 0.8, fallback_models: ['no-sampling-fallback'] },
+    });
+    window.postMessage({
+      command: 'modelsLoaded',
+      models: [
+        { modelId: 'no-sampling', capabilities: { temperature: false } },
+        { modelId: 'no-sampling-fallback', capabilities: { temperature: false } },
+      ],
+    });
     await window.happyDOM.waitUntilComplete();
-    const temperature = window.document.getElementById('f-temperature') as HTMLInputElement;
-    expect(temperature.disabled).toBe(false);
-    temperature.value = '';
-    temperature.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+    expect((window.document.getElementById('f-temperature') as HTMLInputElement).disabled).toBe(false);
+    expect((window.document.getElementById('f-top-p') as HTMLInputElement).disabled).toBe(false);
     (window.document.getElementById('btn-save') as HTMLButtonElement).click();
     await window.happyDOM.waitUntilComplete();
-    expect(messages.some((message) => typeof message === 'object' && message !== null && 'command' in message && message.command === 'save')).toBe(true);
+
+    const saveMessage = messages.find(
+      (message): message is {
+        command: 'save';
+        payload: { temperature?: unknown; top_p?: unknown; main_overrides?: unknown; fallback_models?: unknown };
+      } =>
+        typeof message === 'object' &&
+        message !== null &&
+        'command' in message &&
+        message.command === 'save' &&
+        'payload' in message,
+    );
+    expect(saveMessage?.payload).toMatchObject({ temperature: 0.4, top_p: 0.8 });
+    expect(saveMessage?.payload.main_overrides).toBeNull();
+    expect(saveMessage?.payload.fallback_models).toEqual(['no-sampling-fallback']);
   });
 
   function lastStateForTarget(states: unknown[], target: Record<string, unknown>) {
@@ -1073,13 +1180,15 @@ describe('webview lazy model picker (end-to-end)', () => {
 
   it('marks collapsed fallback capability errors and keeps dirty state after a host error', async () => {
     const { window, states } = env;
-    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'main', temperature: 0.4, fallback_models: ['no-temp'] } });
+    window.postMessage({ command: 'init', type: 'agent', name: 'sisyphus', config: { model: 'main', temperature: 0.4, fallback_models: [{ model: 'no-temp', temperature: 0.6 }] } });
     window.postMessage({ command: 'modelsLoaded', models: [{ modelId: 'no-temp', capabilities: { temperature: false } }] });
     await window.happyDOM.waitUntilComplete();
     const summary = window.document.querySelector('[data-model-position="fallback-1"] summary');
     expect(summary?.textContent).toContain('Needs attention');
     expect(summary?.querySelector('.model-card__error-marker.sr-only')).toBeNull();
-    const temperature = window.document.getElementById('f-temperature') as HTMLInputElement;
+    const temperature = window.document.querySelector<HTMLInputElement>('[data-model-position="fallback-1"] input[name="temperature-override"]');
+    expect(temperature?.title).toBe('This model does not support sampling controls.');
+    if (temperature === null) throw new Error('Fallback temperature control did not render');
     temperature.value = '';
     temperature.dispatchEvent(new window.Event('input', { bubbles: true }));
     (window.document.getElementById('btn-save') as HTMLButtonElement).click();

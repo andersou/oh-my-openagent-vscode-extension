@@ -321,7 +321,7 @@ export class AgentModelTreeProvider
     item.contextValue = 'configFile';
     item.iconPath = new vscode.ThemeIcon('file-code');
     item.tooltip = configPath;
-    item.description = this.configStore.getScope();
+    item.description = `${this.configStore.getScope()} · ${this.configStore.getRoutingDialect()}`;
     return item;
   }
 
@@ -334,10 +334,8 @@ export class AgentModelTreeProvider
     const profile = this.profileStore.getProfile(active);
     if (profile === undefined) return undefined;
 
-    const modified = this.profileStore.isActiveProfileModified();
-    const modifications = modified
-      ? this.profileStore.getActiveProfileModifications()
-      : [];
+    const modifications = this.profileStore.getActiveProfileModifications();
+    const modified = modifications.length > 0;
     const item = new vscode.TreeItem(
       modified ? `${active} *` : active,
       vscode.TreeItemCollapsibleState.Expanded,

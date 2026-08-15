@@ -405,4 +405,94 @@ describe('routing boundary', () => {
       });
     });
   });
+  describe('profile source of truth', () => {
+    it('reprojects one internal profile across routing dialects without mutating it', async () => {
+      writeConfig(CONFIG_WITH_COMMENT);
+      configStore.dispose();
+      configStore = new ConfigStore(tmpDir, undefined, 'opencode', 'mainline');
+      const profileStore = new ProfileStore(configStore);
+      await profileStore.createProfileFromFragment('truth', {
+        agents: {
+          sisyphus: {
+            model: 'a/one',
+            main_overrides: { temperature: 0.3 },
+            fallback_models: ['b/two'],
+          },
+        },
+      });
+      await profileStore.activateProfile('truth');
+      const storedProfile = profileStore.getProfile('truth');
+
+      expect(readAgent('sisyphus')).toEqual({
+        models: [{ model: 'a/one', temperature: 0.3 }, 'b/two'],
+      });
+
+      configStore.setRoutingDialect('latest');
+      await profileStore.projectActiveProfileToConfig();
+
+      expect(readAgent('sisyphus')).toEqual({
+        model: 'a/one',
+        temperature: 0.3,
+        fallback_models: ['b/two'],
+      });
+      expect(profileStore.getProfile('truth')).toEqual(storedProfile);
+
+      configStore.setRoutingDialect('mainline');
+      await profileStore.projectActiveProfileToConfig();
+
+      expect(readAgent('sisyphus')).toEqual({
+        models: [{ model: 'a/one', temperature: 0.3 }, 'b/two'],
+      });
+      expect(profileStore.getProfile('truth')).toEqual(storedProfile);
+    });
+
+    it('compares the normalized global output and preserves routing hidden from disk', async () => {
+      writeConfig('{}');
+      configStore.dispose();
+      configStore = new ConfigStore(tmpDir, undefined, 'global', 'latest');
+      const profileStore = new ProfileStore(configStore);
+      await profileStore.createProfileFromFragment('truth', {
+        agents: {
+          sisyphus: {
+            model: 'a/one',
+            main_overrides: { temperature: 0.3 },
+            fallback_models: ['b/two'],
+          },
+        },
+      });
+      await profileStore.activateProfile('truth');
+
+      const projected = parse(readRaw(), [], { allowTrailingComma: true }) as {
+        agents?: Record<string, Record<string, unknown>>;
+      };
+      expect(projected.agents?.sisyphus).toEqual({
+        model: 'a/one',
+        temperature: 0.3,
+      });
+      expect(profileStore.getActiveProfileModifications()).toEqual([]);
+      expect(profileStore.isActiveProfileModified()).toBe(false);
+
+      await profileStore.saveActiveConfigToProfile();
+
+      expect(profileStore.getProfile('truth')?.agents?.sisyphus).toEqual({
+        model: 'a/one',
+        main_overrides: { temperature: 0.3 },
+        fallback_models: ['b/two'],
+      });
+
+      writeConfig(`{
+  "agents": {
+    "sisyphus": { "model": "c/three", "temperature": 0.3 }
+  }
+}`);
+      configStore.refreshFromDisk();
+      await profileStore.saveActiveConfigToProfile();
+
+      expect(profileStore.getProfile('truth')?.agents?.sisyphus).toEqual({
+        model: 'c/three',
+        main_overrides: { temperature: 0.3 },
+        fallback_models: ['b/two'],
+      });
+    });
+  });
 });

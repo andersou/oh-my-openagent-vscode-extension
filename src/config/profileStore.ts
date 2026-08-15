@@ -13,8 +13,15 @@ import type {
   OmOConfig,
 } from './schema.js';
 import { CONFIG_SCOPES } from './schema.js';
-import type { RoutingDialect } from './routingConversion.js';
-import { ROUTING_DIALECTS } from './routingConversion.js';
+import {
+  ROUTING_DIALECTS,
+  routingScopeKindForScope,
+  toInternalRoutingEntry,
+  toInternalRoutingFragment,
+  toPublicRoutingConfig,
+  type RoutingDialect,
+  type RoutingScopeKind,
+} from './routingConversion.js';
 import type {
   NormalizedProfilesFile,
   ProfileFragment,
@@ -26,8 +33,6 @@ import {
   exportProfileFragment,
   resolveProfileNameCollisions,
 } from './profileTransferSerialization.js';
-import { toInternalRoutingFragment } from './routingConversion.js';
-import { normalizeRoutingForComparison } from './routingConversion.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -89,6 +94,142 @@ function internalProfile(profile: Profile): Profile {
       ? {}
       : { categories: converted.categories }),
   };
+}
+
+type ProfileEntry = AgentConfig | CategoryConfig;
+
+function profileFragment(
+  source: Pick<OmOConfig, 'agents' | 'categories'>,
+): ProfileFragment {
+  return {
+    ...(source.agents === undefined
+      ? {}
+      : { agents: deepClone(source.agents) }),
+    ...(source.categories === undefined
+      ? {}
+      : { categories: deepClone(source.categories) }),
+  };
+}
+
+function publicRoutingFragment(
+  fragment: ProfileFragment,
+  dialect: RoutingDialect,
+  scope: ConfigScope,
+): ProfileFragment {
+  const output = toPublicRoutingConfig(
+    {
+      ...(fragment.agents === undefined ? {} : { agents: fragment.agents }),
+      ...(fragment.categories === undefined
+        ? {}
+        : { categories: fragment.categories }),
+    },
+    dialect,
+    routingScopeKindForScope(scope),
+  );
+  return {
+    ...(output.agents === undefined ? {} : { agents: output.agents }),
+    ...(output.categories === undefined
+      ? {}
+      : { categories: output.categories }),
+  };
+}
+
+function reconcileInternalEntry(
+  previous: ProfileEntry,
+  publicOutput: ProfileEntry,
+  dialect: RoutingDialect,
+  scopeKind: RoutingScopeKind,
+): ProfileEntry {
+  const previousRecord = previous as Record<string, unknown>;
+  const outputRecord = publicOutput as Record<string, unknown>;
+  const next = toInternalRoutingEntry(outputRecord);
+  if (dialect !== 'latest' || scopeKind === 'harness') {
+    return next as ProfileEntry;
+  }
+
+  const previousOverrides = previousRecord.main_overrides;
+  if (
+    typeof previousOverrides === 'object' &&
+    previousOverrides !== null &&
+    !Array.isArray(previousOverrides)
+  ) {
+    const restoredOverrides: Record<string, unknown> = {};
+    for (const key of Object.keys(previousOverrides)) {
+      if (!Object.hasOwn(outputRecord, key)) {
+        delete next[key];
+        continue;
+      }
+      restoredOverrides[key] = structuredClone(outputRecord[key]);
+      if (Object.hasOwn(previousRecord, key)) {
+        next[key] = structuredClone(previousRecord[key]);
+      } else {
+        delete next[key];
+      }
+    }
+    if (Object.keys(restoredOverrides).length > 0) {
+      next.main_overrides = restoredOverrides;
+    } else {
+      delete next.main_overrides;
+    }
+  }
+
+  if (
+    scopeKind === 'global' &&
+    Object.hasOwn(previousRecord, 'fallback_models')
+  ) {
+    next.fallback_models = structuredClone(previousRecord.fallback_models);
+  }
+  return next as ProfileEntry;
+}
+
+function reconcileInternalFragment(
+  previous: ProfileFragment,
+  current: ProfileFragment,
+  dialect: RoutingDialect,
+  scope: ConfigScope,
+): ProfileFragment {
+  const previousOutput = publicRoutingFragment(previous, dialect, scope);
+  const currentOutput = publicRoutingFragment(current, dialect, scope);
+  const scopeKind = routingScopeKindForScope(scope);
+  const result: {
+    agents?: Record<string, AgentConfig>;
+    categories?: Record<string, CategoryConfig>;
+  } = {};
+
+  for (const group of ['agents', 'categories'] as const) {
+    const currentEntries = currentOutput[group];
+    if (currentEntries === undefined) {
+      continue;
+    }
+    const previousEntries = previous[group] ?? {};
+    const previousOutputEntries = previousOutput[group] ?? {};
+    const reconciled: Record<string, ProfileEntry> = {};
+    for (const [name, currentEntry] of Object.entries(currentEntries)) {
+      const previousEntry = previousEntries[name];
+      const previousOutputEntry = previousOutputEntries[name];
+      reconciled[name] =
+        previousEntry !== undefined &&
+        previousOutputEntry !== undefined &&
+        deepEqual(previousOutputEntry, currentEntry)
+          ? deepClone(previousEntry)
+          : previousEntry === undefined
+            ? (toInternalRoutingEntry(
+                currentEntry as Record<string, unknown>,
+              ) as ProfileEntry)
+            : reconcileInternalEntry(
+                previousEntry,
+                currentEntry,
+                dialect,
+                scopeKind,
+              );
+    }
+    if (group === 'agents') {
+      result.agents = reconciled as Record<string, AgentConfig>;
+    } else {
+      result.categories = reconciled as Record<string, CategoryConfig>;
+    }
+  }
+  return result;
 }
 
 export interface ActiveProfileModification {
@@ -231,7 +372,11 @@ export class ProfileStore {
 
     migrateLegacySidecar(sidecarPath, dir);
 
-    const content = JSON.stringify(data, null, 2) + '\n';
+    const canonicalData: ProfilesFile = {
+      ...data,
+      profiles: data.profiles.map(internalProfile),
+    };
+    const content = JSON.stringify(canonicalData, null, 2) + '\n';
     const tmpPath = `${sidecarPath}.${process.pid}.tmp`;
     fs.writeFileSync(tmpPath, content, 'utf-8');
     fs.renameSync(tmpPath, sidecarPath);
@@ -256,8 +401,8 @@ export class ProfileStore {
   }
 
   /**
-   * Return a deep-cloned `ProfileFragment` (only `agents` and `categories`) of
-   * the named saved profile. Throws when the profile does not exist.
+   * Return a deep-cloned canonical internal `ProfileFragment` (only `agents`
+   * and `categories`) of the named saved profile. Throws when absent.
    */
   getProfileFragment(name: string): ProfileFragment {
     const profile = this.getProfile(name);
@@ -268,9 +413,8 @@ export class ProfileStore {
   }
 
   /**
-   * Return a deep-cloned, normalized snapshot of the entire sidecar file,
-   * suitable for full export. Mutating the returned object does not affect the
-   * store.
+   * Return a deep-cloned canonical internal snapshot of the entire sidecar,
+   * suitable for full profile backup. Mutating it does not affect the store.
    */
   getProfilesFileSnapshot(): NormalizedProfilesFile {
     const data = this.readProfilesFile();
@@ -367,15 +511,15 @@ export class ProfileStore {
     }
 
     const now = new Date().toISOString();
-    const config = this.configStore.getConfig();
+    const snapshot = internalFragment(
+      profileFragment(this.configStore.getConfig()),
+    );
 
     const profile: Profile = {
       name,
       description,
-      agents: config.agents ? deepClone(config.agents) : undefined,
-      categories: config.categories
-        ? deepClone(config.categories)
-        : undefined,
+      agents: snapshot.agents,
+      categories: snapshot.categories,
       createdAt: now,
       updatedAt: now,
     };
@@ -437,12 +581,12 @@ export class ProfileStore {
     const existing = data.profiles[index];
     // Merge patch over existing, but preserve the original name
     const { name: _name, ...rest } = patch;
-    const updated: Profile = {
+    const updated = internalProfile({
       ...existing,
       ...rest,
       name,
       updatedAt: new Date().toISOString(),
-    };
+    });
 
     data.profiles[index] = updated;
     await this.writeProfilesFile(data);
@@ -480,19 +624,31 @@ export class ProfileStore {
 
     if (group === 'agents') {
       const entries = profile.agents ?? {};
-      const existing = entries[entryName] ?? {};
-      entries[entryName] = { ...existing, ...patch };
+      const internalPatch = toInternalRoutingFragment({
+        agents: { [entryName]: patch },
+      }).agents![entryName]!;
+      const merged: AgentConfig = {
+        ...entries[entryName],
+        ...internalPatch,
+      };
       for (const key of nullKeys) {
-        delete (entries[entryName] as Record<string, unknown>)[key];
+        delete (merged as Record<string, unknown>)[key];
       }
+      entries[entryName] = merged;
       profile.agents = entries;
     } else {
       const entries = profile.categories ?? {};
-      const existing = entries[entryName] ?? {};
-      entries[entryName] = { ...existing, ...patch };
+      const internalPatch = toInternalRoutingFragment({
+        categories: { [entryName]: patch },
+      }).categories![entryName]!;
+      const merged: CategoryConfig = {
+        ...entries[entryName],
+        ...internalPatch,
+      };
       for (const key of nullKeys) {
-        delete (entries[entryName] as Record<string, unknown>)[key];
+        delete (merged as Record<string, unknown>)[key];
       }
+      entries[entryName] = merged;
       profile.categories = entries;
     }
 
@@ -582,10 +738,34 @@ export class ProfileStore {
   }
 
   /**
-   * Activate a profile by writing its `agents` / `categories` into the
-   * active config via `ConfigStore.updateConfig`, which preserves JSONC
-   * formatting (comments, trailing commas, etc.). Also persists the active
-   * profile name in the sidecar.
+   * Project a saved profile into `omo.jsonc`. The profile remains the internal
+   * source of truth; `ConfigStore` performs the dialect/scope serialization.
+   */
+  private async projectProfileToConfig(profile: Profile): Promise<void> {
+    await this.replaceActiveConfigFragment(profileFragment(profile));
+  }
+
+  /**
+   * Reproject the active profile using the current routing dialect and scope.
+   * Returns `false` when no profile is active.
+   */
+  async projectActiveProfileToConfig(): Promise<boolean> {
+    const data = this.readProfilesFile();
+    const active = data.lastActiveProfile;
+    if (active === undefined) {
+      return false;
+    }
+    const profile = data.profiles.find((candidate) => candidate.name === active);
+    if (profile === undefined) {
+      throw new Error(`Active profile "${active}" not found`);
+    }
+    await this.projectProfileToConfig(profile);
+    return true;
+  }
+
+  /**
+   * Activate a profile by projecting its internal `agents` / `categories`
+   * through `ConfigStore`, then persist the active profile name.
    */
   async activateProfile(name: string): Promise<void> {
     const profile = this.getProfile(name);
@@ -593,18 +773,7 @@ export class ProfileStore {
       throw new Error(`Profile "${name}" not found`);
     }
 
-    await this.configStore.updateConfig((draft: OmOConfig) => {
-      if (profile.agents) {
-        draft.agents = profile.agents;
-      } else {
-        delete draft.agents;
-      }
-      if (profile.categories) {
-        draft.categories = profile.categories;
-      } else {
-        delete draft.categories;
-      }
-    });
+    await this.projectProfileToConfig(profile);
 
     const data = this.readProfilesFile();
     data.lastActiveProfile = name;
@@ -772,14 +941,34 @@ export class ProfileStore {
    * names). Returns an empty array when no profile is active or unchanged.
    */
   getActiveProfileModifications(): ActiveProfileModification[] {
-    const active = this.getActiveProfileName();
+    const data = this.readProfilesFile();
+    const active = data.lastActiveProfile;
     if (active === undefined) return [];
-    const profile = this.getProfile(active);
+    const profile = data.profiles.find((candidate) => candidate.name === active);
     if (profile === undefined) return [];
-    const config = this.configStore.getConfig();
+    const scope = this.configStore.getScope();
+    const dialect = this.configStore.getRoutingDialect();
+    const profileOutput = publicRoutingFragment(
+      profileFragment(profile),
+      dialect,
+      scope,
+    );
+    const configOutput = publicRoutingFragment(
+      profileFragment(this.configStore.getConfig()),
+      dialect,
+      scope,
+    );
     return [
-      ...this.diffGroup('agents', profile.agents ?? {}, config.agents ?? {}),
-      ...this.diffGroup('categories', profile.categories ?? {}, config.categories ?? {}),
+      ...this.diffGroup(
+        'agents',
+        profileOutput.agents ?? {},
+        configOutput.agents ?? {},
+      ),
+      ...this.diffGroup(
+        'categories',
+        profileOutput.categories ?? {},
+        configOutput.categories ?? {},
+      ),
     ];
   }
 
@@ -800,20 +989,12 @@ export class ProfileStore {
         result.push({ group, name, type: 'added' });
       } else if (inConfig === undefined) {
         result.push({ group, name, type: 'removed' });
-      } else {
-        const normalizedProfile = normalizeRoutingForComparison(
+      } else if (!deepEqual(inProfile, inConfig)) {
+        const changedFields = this.diffFieldNames(
           inProfile as Record<string, unknown>,
-        );
-        const normalizedConfig = normalizeRoutingForComparison(
           inConfig as Record<string, unknown>,
         );
-        if (!deepEqual(normalizedProfile, normalizedConfig)) {
-          const changedFields = this.diffFieldNames(
-            normalizedProfile,
-            normalizedConfig,
-          );
-          result.push({ group, name, type: 'modified', changedFields });
-        }
+        result.push({ group, name, type: 'modified', changedFields });
       }
     }
     return result.sort((a, b) => a.name.localeCompare(b.name));
@@ -834,49 +1015,44 @@ export class ProfileStore {
   }
 
   /**
-   * Return `true` when an active profile's stored `agents` / `categories`
-   * snapshot no longer matches the live config — i.e. the config was edited
-   * since the profile was last activated or saved. Comparison is key-order
-   * independent. Returns `false` when no profile is active.
+   * Return `true` when the active profile and live config produce different
+   * normalized public output for the selected routing dialect and scope.
    */
   isActiveProfileModified(): boolean {
-    const active = this.getActiveProfileName();
-    if (active === undefined) return false;
-    const profile = this.getProfile(active);
-    if (profile === undefined) return false;
-    const config = this.configStore.getConfig();
-    return (
-      !deepEqual(profile.agents ?? {}, config.agents ?? {}) ||
-      !deepEqual(profile.categories ?? {}, config.categories ?? {})
-    );
+    return this.getActiveProfileModifications().length > 0;
   }
 
   /**
-   * Snapshot the live config's `agents` / `categories` into the active
-   * profile, overwriting whatever was stored, and bump `updatedAt`. The
-   * inverse of {@link activateProfile}. Throws when no profile is active.
+   * Reconcile the normalized live output back into the active internal
+   * profile. Internal routing state hidden by the selected output projection
+   * is preserved.
    */
   async saveActiveConfigToProfile(): Promise<Profile> {
-    const active = this.getActiveProfileName();
+    const data = this.readProfilesFile();
+    const active = data.lastActiveProfile;
     if (active === undefined) {
       throw new Error('No active profile to save into');
     }
-    const data = this.readProfilesFile();
-    const profile = data.profiles.find((p) => p.name === active);
+    const profile = data.profiles.find((candidate) => candidate.name === active);
     if (!profile) {
       throw new Error(`Active profile "${active}" not found`);
     }
 
-    const config = this.configStore.getConfig();
-    if (config.agents) {
-      profile.agents = deepClone(config.agents);
-    } else {
+    const reconciled = reconcileInternalFragment(
+      profileFragment(profile),
+      profileFragment(this.configStore.getConfig()),
+      this.configStore.getRoutingDialect(),
+      this.configStore.getScope(),
+    );
+    if (reconciled.agents === undefined) {
       delete profile.agents;
-    }
-    if (config.categories) {
-      profile.categories = deepClone(config.categories);
     } else {
+      profile.agents = reconciled.agents;
+    }
+    if (reconciled.categories === undefined) {
       delete profile.categories;
+    } else {
+      profile.categories = reconciled.categories;
     }
     profile.updatedAt = new Date().toISOString();
 

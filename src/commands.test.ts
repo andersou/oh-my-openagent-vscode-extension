@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import * as vscode from 'vscode';
 import { registerCommands } from './commands.js';
 import { CONFIG_SCOPES } from './config/schema.js';
+import { AgentEditorPanel } from './ui/agentEditorPanel.js';
 
 vi.mock('vscode', () => ({
   Uri: {
@@ -46,6 +47,8 @@ vi.mock('./ui/agentEditorPanel.js', () => ({
 type FakeConfigStore = {
   getScope: ReturnType<typeof vi.fn>;
   setScope: ReturnType<typeof vi.fn>;
+  getRoutingDialect: ReturnType<typeof vi.fn>;
+  setRoutingDialect: ReturnType<typeof vi.fn>;
   getShadowingHarnessScopes: ReturnType<typeof vi.fn>;
   removeHarnessBlocks: ReturnType<typeof vi.fn>;
   copyBaseToHarnessBlocks: ReturnType<typeof vi.fn>;
@@ -56,13 +59,16 @@ type FakeConfigStore = {
 type FakeProfileStore = {
   getConfigScope: ReturnType<typeof vi.fn>;
   setConfigScope: ReturnType<typeof vi.fn>;
+  setRoutingDialect: ReturnType<typeof vi.fn>;
   getActiveProfileName: ReturnType<typeof vi.fn>;
+  getProfile: Mock;
   createProfile: ReturnType<typeof vi.fn>;
   activateProfile: ReturnType<typeof vi.fn>;
   renameProfile: ReturnType<typeof vi.fn>;
   duplicateProfile: ReturnType<typeof vi.fn>;
   deleteProfile: ReturnType<typeof vi.fn>;
   saveActiveConfigToProfile: ReturnType<typeof vi.fn>;
+  projectActiveProfileToConfig: Mock;
   onDidChange: { on: ReturnType<typeof vi.fn>; emit: ReturnType<typeof vi.fn> };
 };
 
@@ -92,6 +98,8 @@ function createDependencies(): Dependencies {
     configStore: {
       getScope: vi.fn(() => 'opencode'),
       setScope: vi.fn(),
+      getRoutingDialect: vi.fn(() => 'latest'),
+      setRoutingDialect: vi.fn(),
       getShadowingHarnessScopes: vi.fn(() => []),
       removeHarnessBlocks: vi.fn(),
       copyBaseToHarnessBlocks: vi.fn(),
@@ -101,13 +109,16 @@ function createDependencies(): Dependencies {
     profileStore: {
       getConfigScope: vi.fn(),
       setConfigScope: vi.fn(),
+      setRoutingDialect: vi.fn(),
       getActiveProfileName: vi.fn(),
+      getProfile: vi.fn(),
       createProfile: vi.fn(),
       activateProfile: vi.fn(),
       renameProfile: vi.fn(),
       duplicateProfile: vi.fn(),
       deleteProfile: vi.fn(),
       saveActiveConfigToProfile: vi.fn(),
+      projectActiveProfileToConfig: vi.fn(),
       onDidChange: { on: vi.fn(), emit: vi.fn() },
     },
     treeProvider: {
@@ -151,7 +162,7 @@ describe('registerCommands', () => {
     vi.clearAllMocks();
   });
 
-  it('registers all 18 command IDs including selectConfigScope and selectRoutingDialect', () => {
+  it('registers all 17 command IDs including configureSettings', () => {
     const calls = register(createDependencies());
 
     expect(calls.map(([id]) => id)).toEqual([
@@ -159,8 +170,7 @@ describe('registerCommands', () => {
       'ohMyOpenAgent.editAgent',
       'ohMyOpenAgent.editCategory',
       'ohMyOpenAgent.refresh',
-      'ohMyOpenAgent.selectConfigScope',
-      'ohMyOpenAgent.selectRoutingDialect',
+      'ohMyOpenAgent.configureSettings',
       'ohMyOpenAgent.createProfile',
       'ohMyOpenAgent.activateProfile',
       'ohMyOpenAgent.renameProfile',
@@ -177,7 +187,7 @@ describe('registerCommands', () => {
   });
 });
 
-describe('selectConfigScope', () => {
+describe('configureSettings', () => {
   let deps: Dependencies;
   let handler: (...args: unknown[]) => unknown;
 
@@ -185,104 +195,14 @@ describe('selectConfigScope', () => {
     vi.clearAllMocks();
     deps = createDependencies();
     const calls = register(deps);
-    handler = getCommandHandler('ohMyOpenAgent.selectConfigScope', calls);
+    handler = getCommandHandler('ohMyOpenAgent.configureSettings', calls);
   });
 
-  it('shows four QuickPick items with the current scope marked', async () => {
-    deps.configStore.getScope.mockReturnValue('senpi');
-
-    await handler();
-
-    expect(vscode.window.showQuickPick).toHaveBeenCalledTimes(1);
-    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as {
-      label: string;
-      picked?: boolean;
-      description?: string;
-    }[];
-    expect(items).toHaveLength(4);
-    expect(items.map((item) => item.label)).toEqual([...CONFIG_SCOPES]);
-    expect(items.find((item) => item.label === 'senpi')).toEqual(
-      expect.objectContaining({ picked: true, description: 'Current' }),
-    );
-    expect(items.filter((item) => item.picked)).toHaveLength(1);
-  });
-
-  it('is a no-op when the user cancels the QuickPick', async () => {
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue(undefined);
-
-    await handler();
-
-    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
-    expect(deps.configStore.setScope).not.toHaveBeenCalled();
-    expect(
-      (await import('./ui/agentEditorPanel.js')).AgentEditorPanel
-        .closeCurrentPanel,
-    ).not.toHaveBeenCalled();
-    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
-  });
-
-  it('persists the scope, updates the store, closes the editor, and shows an info message', async () => {
-    deps.configStore.getScope.mockReturnValue('opencode');
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'senpi',
-    });
-
-    await handler();
-
-    expect(deps.profileStore.setConfigScope).toHaveBeenCalledWith('senpi');
-    expect(deps.configStore.setScope).toHaveBeenCalledWith('senpi');
-    expect(
-      (await import('./ui/agentEditorPanel.js')).AgentEditorPanel
-        .closeCurrentPanel,
-    ).toHaveBeenCalled();
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      'The config scope changed to "senpi". The agent editor was closed to avoid stale edits.',
-    );
-  });
-
-  it('calls profileStore.setConfigScope before configStore.setScope', async () => {
-    deps.configStore.getScope.mockReturnValue('opencode');
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'codex',
-    });
-
-    await handler();
-
-    expect(deps.profileStore.setConfigScope).toHaveBeenCalledBefore(
-      deps.configStore.setScope,
-    );
-  });
-
-  it('shows an error when the sidecar write fails', async () => {
-    deps.configStore.getScope.mockReturnValue('opencode');
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'global',
-    });
-    deps.profileStore.setConfigScope.mockRejectedValue(
-      new Error('disk full'),
-    );
-
-    await handler();
-
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-      'Failed to set config scope: disk full',
-    );
-    expect(deps.configStore.setScope).not.toHaveBeenCalled();
-    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
-  });
-
-  it('is a no-op when the user re-picks the current scope', async () => {
-    deps.configStore.getScope.mockReturnValue('opencode');
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'opencode',
-    });
-
-    await handler();
-
-    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
-    expect(deps.configStore.setScope).not.toHaveBeenCalled();
-    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
-  });
+  function pickSettings(scope: string, dialect: string): void {
+    vi.mocked(vscode.window.showQuickPick)
+      .mockResolvedValueOnce({ label: scope } as never)
+      .mockResolvedValueOnce({ label: dialect } as never);
+  }
 
   function mockModalChoice(choice: string | undefined): void {
     vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
@@ -290,15 +210,141 @@ describe('selectConfigScope', () => {
     );
   }
 
-  it('removes the shadowing harness blocks before switching to global', async () => {
+  it('sequentially shows harness and routing model QuickPicks with current values marked', async () => {
+    deps.configStore.getScope.mockReturnValue('senpi');
+    deps.configStore.getRoutingDialect.mockReturnValue('mainline');
+    vi.mocked(vscode.window.showQuickPick)
+      .mockResolvedValueOnce({ label: 'senpi' } as never)
+      .mockResolvedValueOnce(undefined);
+
+    await handler();
+
+    expect(vscode.window.showQuickPick).toHaveBeenCalledTimes(2);
+    const scopeItems = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as {
+      label: string;
+      picked?: boolean;
+      description?: string;
+    }[];
+    expect(scopeItems).toHaveLength(4);
+    expect(scopeItems.map((item) => item.label)).toEqual([...CONFIG_SCOPES]);
+    expect(scopeItems.find((item) => item.label === 'senpi')).toEqual(
+      expect.objectContaining({ picked: true, description: 'Current' }),
+    );
+    expect(scopeItems.filter((item) => item.picked)).toHaveLength(1);
+    expect(vi.mocked(vscode.window.showQuickPick).mock.calls[0][1]).toEqual({
+      placeHolder: '1/2 Select the active harness',
+    });
+
+    const dialectItems = vi.mocked(vscode.window.showQuickPick).mock.calls[1][0] as {
+      label: string;
+      picked?: boolean;
+      description?: string;
+    }[];
+    expect(dialectItems.map((item) => item.label)).toEqual([
+      'latest',
+      'mainline',
+    ]);
+    expect(dialectItems.find((item) => item.label === 'mainline')).toEqual(
+      expect.objectContaining({ picked: true, description: 'Current' }),
+    );
+    expect(vi.mocked(vscode.window.showQuickPick).mock.calls[1][1]).toEqual({
+      placeHolder: '2/2 Select the routing model',
+    });
+  });
+
+  it('is a no-op when the user cancels the harness QuickPick', async () => {
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValue(undefined);
+
+    await handler();
+
+    expect(vscode.window.showQuickPick).toHaveBeenCalledTimes(1);
+    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.profileStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when the user cancels the routing model QuickPick', async () => {
+    vi.mocked(vscode.window.showQuickPick)
+      .mockResolvedValueOnce({ label: 'senpi' } as never)
+      .mockResolvedValueOnce(undefined);
+
+    await handler();
+
+    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.profileStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('persists changed harness and routing model, closes stale editor, refreshes, and reports both values', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getRoutingDialect.mockReturnValue('latest');
+    pickSettings('senpi', 'mainline');
+
+    await handler();
+
+    expect(deps.profileStore.setConfigScope).toHaveBeenCalledWith('senpi');
+    expect(deps.configStore.setScope).toHaveBeenCalledWith('senpi');
+    expect(deps.profileStore.setRoutingDialect).toHaveBeenCalledWith('mainline');
+    expect(deps.configStore.setRoutingDialect).toHaveBeenCalledWith('mainline');
+    expect(deps.profileStore.setConfigScope).toHaveBeenCalledBefore(
+      deps.configStore.setScope,
+    );
+    expect(deps.profileStore.setRoutingDialect).toHaveBeenCalledBefore(
+      deps.configStore.setRoutingDialect,
+    );
+    expect(AgentEditorPanel.closeCurrentPanel).toHaveBeenCalled();
+    expect(deps.treeProvider.refresh).toHaveBeenCalled();
+    expect(deps.profileStore.projectActiveProfileToConfig).toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'Settings updated: harness "senpi", routing model "mainline". The agent editor was closed to avoid stale edits.',
+    );
+  });
+
+  it('updates only the routing model when the harness is unchanged', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getRoutingDialect.mockReturnValue('latest');
+    pickSettings('opencode', 'mainline');
+
+    await handler();
+
+    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(AgentEditorPanel.closeCurrentPanel).not.toHaveBeenCalled();
+    expect(deps.profileStore.setRoutingDialect).toHaveBeenCalledWith('mainline');
+    expect(deps.configStore.setRoutingDialect).toHaveBeenCalledWith('mainline');
+    expect(deps.treeProvider.refresh).toHaveBeenCalled();
+    expect(deps.profileStore.projectActiveProfileToConfig).toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'Settings updated: harness "opencode", routing model "mainline".',
+    );
+  });
+
+  it('is a no-op when both selections are current', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getRoutingDialect.mockReturnValue('latest');
+    pickSettings('opencode', 'latest');
+
+    await handler();
+
+    expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.profileStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(deps.treeProvider.refresh).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('removes shadowing harness blocks before switching to global', async () => {
     deps.configStore.getScope.mockReturnValue('opencode');
     deps.configStore.getShadowingHarnessScopes.mockReturnValue([
       'opencode',
       'senpi',
     ]);
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'global',
-    });
+    pickSettings('global', 'latest');
     mockModalChoice('Remove Harness Blocks');
 
     await handler();
@@ -318,9 +364,7 @@ describe('selectConfigScope', () => {
   it('copies the shared base into every harness block when asked', async () => {
     deps.configStore.getScope.mockReturnValue('opencode');
     deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'global',
-    });
+    pickSettings('global', 'latest');
     mockModalChoice('Copy Global to All Harnesses');
 
     await handler();
@@ -330,12 +374,10 @@ describe('selectConfigScope', () => {
     expect(deps.configStore.setScope).toHaveBeenCalledWith('global');
   });
 
-  it('keeps the current scope when the reconciliation prompt is cancelled', async () => {
+  it('keeps the current settings when the reconciliation prompt is cancelled', async () => {
     deps.configStore.getScope.mockReturnValue('opencode');
     deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'global',
-    });
+    pickSettings('global', 'mainline');
     mockModalChoice(undefined);
 
     await handler();
@@ -343,16 +385,16 @@ describe('selectConfigScope', () => {
     expect(deps.configStore.removeHarnessBlocks).not.toHaveBeenCalled();
     expect(deps.configStore.copyBaseToHarnessBlocks).not.toHaveBeenCalled();
     expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.profileStore.setRoutingDialect).not.toHaveBeenCalled();
     expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setRoutingDialect).not.toHaveBeenCalled();
     expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
   it('does not prompt when no harness block shadows the shared base', async () => {
     deps.configStore.getScope.mockReturnValue('opencode');
     deps.configStore.getShadowingHarnessScopes.mockReturnValue([]);
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'global',
-    });
+    pickSettings('global', 'latest');
 
     await handler();
 
@@ -361,12 +403,33 @@ describe('selectConfigScope', () => {
     expect(deps.configStore.setScope).toHaveBeenCalledWith('global');
   });
 
+  it('warns when global latest projection hides active-profile fallbacks', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getShadowingHarnessScopes.mockReturnValue([]);
+    deps.profileStore.getActiveProfileName.mockReturnValue('truth');
+    deps.profileStore.getProfile.mockReturnValue({
+      name: 'truth',
+      agents: {
+        sisyphus: {
+          model: 'main/model',
+          fallback_models: ['fallback/model'],
+        },
+      },
+    });
+    pickSettings('global', 'latest');
+
+    await handler();
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      'The active profile contains fallback chains. omo 4.x cannot represent them in global output, so omo.jsonc will omit them; the profile keeps them for other harnesses and routing models.',
+    );
+    expect(deps.profileStore.projectActiveProfileToConfig).toHaveBeenCalledOnce();
+  });
+
   it('never reconciles omo.jsonc when switching to a harness scope', async () => {
     deps.configStore.getScope.mockReturnValue('global');
     deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'senpi',
-    });
+    pickSettings('senpi', 'latest');
 
     await handler();
 
@@ -376,12 +439,29 @@ describe('selectConfigScope', () => {
     expect(deps.configStore.setScope).toHaveBeenCalledWith('senpi');
   });
 
-  it('reports a reconciliation failure and leaves the scope unchanged', async () => {
+  it('reports a settings failure and leaves later updates unapplied', async () => {
+    deps.configStore.getScope.mockReturnValue('opencode');
+    deps.configStore.getRoutingDialect.mockReturnValue('latest');
+    pickSettings('senpi', 'mainline');
+    deps.profileStore.setConfigScope.mockRejectedValue(
+      new Error('disk full'),
+    );
+
+    await handler();
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+      'Failed to update settings: disk full',
+    );
+    expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(deps.profileStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(deps.configStore.setRoutingDialect).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('reports a reconciliation failure and leaves settings unchanged', async () => {
     deps.configStore.getScope.mockReturnValue('opencode');
     deps.configStore.getShadowingHarnessScopes.mockReturnValue(['opencode']);
-    vi.mocked(vscode.window.showQuickPick).mockResolvedValue({
-      label: 'global',
-    });
+    pickSettings('global', 'mainline');
     mockModalChoice('Remove Harness Blocks');
     deps.configStore.removeHarnessBlocks.mockRejectedValue(
       new Error('disk full'),
@@ -393,6 +473,8 @@ describe('selectConfigScope', () => {
       'Failed to update omo.jsonc for the global scope: disk full',
     );
     expect(deps.profileStore.setConfigScope).not.toHaveBeenCalled();
+    expect(deps.profileStore.setRoutingDialect).not.toHaveBeenCalled();
     expect(deps.configStore.setScope).not.toHaveBeenCalled();
+    expect(deps.configStore.setRoutingDialect).not.toHaveBeenCalled();
   });
 });

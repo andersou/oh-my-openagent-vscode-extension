@@ -1,4 +1,4 @@
-// Command handlers for the 11 Oh My OpenAgent VS Code commands declared in
+// Command handlers for the 17 Oh My OpenAgent VS Code commands declared in
 // `package.json`. All wiring lives here so `extension.ts` stays a thin
 // activation shim: it instantiates the stores + tree provider, calls
 // `registerCommands(...)`, and pushes the returned `Disposable` into
@@ -29,7 +29,12 @@ import type {
   AgentModelTreeProvider,
 } from './ui/agentModelTreeProvider.js';
 import type { ModelDiscovery } from './opencode/modelDiscovery.js';
-import { CONFIG_SCOPES, type ConfigScope } from './config/schema.js';
+import {
+  CONFIG_SCOPES,
+  type AgentConfig,
+  type CategoryConfig,
+  type ConfigScope,
+} from './config/schema.js';
 import {
   ROUTING_DIALECTS,
   type RoutingDialect,
@@ -122,84 +127,87 @@ export function registerCommands(
       treeProvider.refresh();
     }),
 
-    // 5. Select the active config scope.
+    // 5. Configure the active harness and routing model in one flow.
     vscode.commands.registerCommand(
-      'ohMyOpenAgent.selectConfigScope',
+      'ohMyOpenAgent.configureSettings',
       async () => {
         const currentScope = configStore.getScope();
-        const items = CONFIG_SCOPES.map((scope) => ({
-          label: scope,
-          picked: scope === currentScope,
-          description: scope === currentScope ? 'Current' : undefined,
-        }));
-        const picked = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select the active config scope',
-        });
-        if (picked === undefined) {
-          return; // user cancelled
+        const pickedScope = await vscode.window.showQuickPick(
+          CONFIG_SCOPES.map((scope) => ({
+            label: scope,
+            picked: scope === currentScope,
+            description: scope === currentScope ? 'Current' : undefined,
+          })),
+          { placeHolder: '1/2 Select the active harness' },
+        );
+        if (pickedScope === undefined) {
+          return;
         }
-        const scope = picked.label as ConfigScope;
-        if (scope === currentScope) {
+
+        const currentDialect = configStore.getRoutingDialect();
+        const pickedDialect = await vscode.window.showQuickPick(
+          ROUTING_DIALECTS.map((dialect) => ({
+            label: dialect,
+            picked: dialect === currentDialect,
+            description:
+              dialect === currentDialect
+                ? 'Current'
+                : dialect === 'latest'
+                  ? 'compatible with omo 4.x stable — writes fallback_models in the opencode scope'
+                  : 'omo 5.x mainline — writes the models array',
+          })),
+          { placeHolder: '2/2 Select the routing model' },
+        );
+        if (pickedDialect === undefined) {
+          return;
+        }
+
+        const scope = pickedScope.label as ConfigScope;
+        const dialect = pickedDialect.label as RoutingDialect;
+        const scopeChanged = scope !== currentScope;
+        const dialectChanged = dialect !== currentDialect;
+        if (!scopeChanged && !dialectChanged) {
           return;
         }
         if (
+          scopeChanged &&
           scope === 'global' &&
           !(await reconcileForGlobalScope(configStore))
         ) {
           return;
         }
-        try {
-          await profileStore.setConfigScope(scope);
-          configStore.setScope(scope);
-          AgentEditorPanel.closeCurrentPanel();
-          void vscode.window.showInformationMessage(
-            `The config scope changed to "${scope}". The agent editor was closed to avoid stale edits.`,
+        if (
+          scope === 'global' &&
+          dialect === 'latest' &&
+          activeProfileHasFallbackChains(profileStore)
+        ) {
+          await vscode.window.showWarningMessage(
+            'The active profile contains fallback chains. omo 4.x cannot represent them in global output, so omo.jsonc will omit them; the profile keeps them for other harnesses and routing models.',
           );
-        } catch (err) {
-          reportError('Failed to set config scope', err);
         }
-      },
-    ),
 
-    // 6. Select the active routing dialect.
-    vscode.commands.registerCommand(
-      'ohMyOpenAgent.selectRoutingDialect',
-      async () => {
-        const currentDialect = configStore.getRoutingDialect();
-        const items = ROUTING_DIALECTS.map((dialect) => ({
-          label: dialect,
-          picked: dialect === currentDialect,
-          description:
-            dialect === currentDialect
-              ? 'Current'
-              : dialect === 'latest'
-                ? 'compatible with omo 4.x stable — writes fallback_models in the opencode scope'
-                : 'omo 5.x mainline — writes the models array',
-        }));
-        const picked = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select the active routing dialect',
-        });
-        if (picked === undefined) {
-          return; // user cancelled
-        }
-        const dialect = picked.label as RoutingDialect;
-        if (dialect === currentDialect) {
-          return;
-        }
         try {
-          await profileStore.setRoutingDialect(dialect);
-          configStore.setRoutingDialect(dialect);
+          if (scopeChanged) {
+            await profileStore.setConfigScope(scope);
+            configStore.setScope(scope);
+            AgentEditorPanel.closeCurrentPanel();
+          }
+          if (dialectChanged) {
+            await profileStore.setRoutingDialect(dialect);
+            configStore.setRoutingDialect(dialect);
+          }
+          await profileStore.projectActiveProfileToConfig();
           treeProvider.refresh();
           void vscode.window.showInformationMessage(
-            `The routing dialect changed to "${dialect}".`,
+            `Settings updated: harness "${scope}", routing model "${dialect}".${scopeChanged ? ' The agent editor was closed to avoid stale edits.' : ''}`,
           );
         } catch (err) {
-          reportError('Failed to set routing dialect', err);
+          reportError('Failed to update settings', err);
         }
       },
     ),
 
-    // 7. Create a new profile by snapshotting the current config.
+    // 6. Create a new profile by snapshotting the current config.
     vscode.commands.registerCommand(
       'ohMyOpenAgent.createProfile',
       async () => {
@@ -428,6 +436,32 @@ function isProfileItem(
 function reportError(prefix: string, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   void vscode.window.showErrorMessage(`${prefix}: ${message}`);
+}
+
+function routingEntryHasFallbacks(
+  entry: AgentConfig | CategoryConfig,
+): boolean {
+  const fallbacks = entry.fallback_models;
+  return typeof fallbacks === 'string'
+    ? fallbacks.length > 0
+    : Array.isArray(fallbacks) && fallbacks.length > 0;
+}
+
+function activeProfileHasFallbackChains(
+  profileStore: ProfileStore,
+): boolean {
+  const active = profileStore.getActiveProfileName();
+  if (active === undefined) {
+    return false;
+  }
+  const profile = profileStore.getProfile(active);
+  if (profile === undefined) {
+    return false;
+  }
+  return [
+    ...Object.values(profile.agents ?? {}),
+    ...Object.values(profile.categories ?? {}),
+  ].some(routingEntryHasFallbacks);
 }
 
 /**

@@ -75,6 +75,7 @@ function makeConfigStoreStub(
   categories: Record<string, object> = {},
   configPath: string = '/fake/path/oh-my-openagent.json',
   initialScope: string = 'opencode',
+  routingDialect: string = 'latest',
 ): ConfigStore {
   let scope = initialScope;
   const emitter = new EventEmitter();
@@ -84,6 +85,7 @@ function makeConfigStoreStub(
     getCategory: (name: string) => categories[name] as { model?: string } | undefined,
     getConfigPath: () => configPath,
     getScope: () => scope,
+    getRoutingDialect: () => routingDialect,
     setScope: (newScope: string) => {
       if (newScope !== scope) {
         scope = newScope;
@@ -96,7 +98,6 @@ function makeConfigStoreStub(
 function makeProfileStoreStub(
   profiles: Profile[] = [],
   active: string | undefined = undefined,
-  modified = false,
   modifications: ActiveProfileModification[] = [],
 ): ProfileStore {
   return {
@@ -104,7 +105,6 @@ function makeProfileStoreStub(
     listProfiles: () => profiles,
     getActiveProfileName: () => active,
     getProfile: (name: string) => profiles.find((p) => p.name === name),
-    isActiveProfileModified: () => modified,
     getActiveProfileModifications: () => modifications,
   } as unknown as ProfileStore;
 }
@@ -151,17 +151,17 @@ describe('AgentModelTreeProvider', () => {
     expect(roots[1].group).toBe('profiles');
   });
 
-  it('shows the active config scope as the description on the configFile root item', () => {
+  it('shows the routing model beside the active harness on the config item', () => {
     const roots = provider.getChildren();
     const configFile = roots[0];
     expect(configFile.kind).toBe('configFile');
-    expect(configFile.description).toBe('opencode');
+    expect(configFile.description).toBe('opencode · latest');
 
     configStore.setScope('senpi');
     const rootsAfter = provider.getChildren();
     const configFileAfter = rootsAfter[0];
     expect(configFileAfter.kind).toBe('configFile');
-    expect(configFileAfter.description).toBe('senpi');
+    expect(configFileAfter.description).toBe('senpi · latest');
   });
 
   it('exposes Agents and Categories under the configFile when no profile is active', () => {
@@ -619,7 +619,7 @@ describe('AgentModelTreeProvider', () => {
     });
 
     it('shows the active profile nested under the config file with Expanded state', () => {
-      profileStore = makeProfileStoreStub([{ name: 'fast' }], 'fast', false);
+      profileStore = makeProfileStoreStub([{ name: 'fast' }], 'fast');
       provider = new AgentModelTreeProvider(configStore, profileStore);
       const roots = provider.getChildren();
       expect(roots).toHaveLength(2);
@@ -634,7 +634,11 @@ describe('AgentModelTreeProvider', () => {
     });
 
     it('appends "*" and flips contextValue when the active profile is modified', () => {
-      profileStore = makeProfileStoreStub([{ name: 'fast' }], 'fast', true);
+      profileStore = makeProfileStoreStub(
+        [{ name: 'fast' }],
+        'fast',
+        [{ group: 'agents', name: 'sisyphus', type: 'modified', changedFields: ['model'] }],
+      );
       provider = new AgentModelTreeProvider(configStore, profileStore);
       const roots = provider.getChildren();
       const activeItem = provider.getChildren(roots[0])[0];
@@ -650,7 +654,6 @@ describe('AgentModelTreeProvider', () => {
       profileStore = makeProfileStoreStub(
         [{ name: 'fast' }],
         'fast',
-        true,
         modifications,
       );
       provider = new AgentModelTreeProvider(configStore, profileStore);
