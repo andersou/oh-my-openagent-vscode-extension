@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-19
+
+This stable release promotes `1.3.0-beta.1`. It makes profiles the canonical routing source, unifies sidebar settings, and simplifies model generation overrides without losing legacy profile data.
+
+### Features
+
+- **Canonical profile routing** - profiles now persist one internal `model` + `main_overrides` + `fallback_models` representation. Activation and harness/routing changes project that unchanged profile into the selected disk format.
+- **Unified sidebar settings** - one gear command sequentially selects the harness and routing model, and the config tree item displays both selections.
+- **Simplified generation controls** - Advanced cards use direct inherit-or-override controls for Reasoning effort, Thinking, Temperature, Top-p, and Max tokens. Editable `variant` and legacy `reasoningEffort` controls are removed while hidden legacy values remain round-trip safe.
+- **Sampling capability guidance** - Temperature and Top-p remain editable as shared defaults. Model cards without sampling support disable only their per-model controls with an explanatory tooltip, and inherited defaults do not serialize as card overrides.
+
+### Bug Fixes
+
+- **Stable active-profile comparisons** - profile and live config differences are computed from matching scope- and dialect-specific projections, eliminating false modification indicators caused by equivalent disk encodings.
+- **Lossless profile preservation** - routing omitted by a lossy global projection remains in the profile, and profile-context editor saves update the profile before reprojection so projection failures cannot discard the edit.
+
+### Tests
+
+- **678 tests across 23 files** cover canonical profile persistence, cross-dialect reprojection, lossy global projection, profile-first editor failures, simplified override interaction, and supported and unsupported sampling-capability paths.
+
+
 ## [1.3.0-beta.1] - 2026-08-15
 
 ### Features
@@ -319,6 +340,7 @@ This release adds profile import/export and JSONC editing to the Oh My OpenAgent
 - Pin the profile-facing upstream contract in the schema module.
 - Bump version to `0.5.0-beta.3`.
 
+[1.3.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.2.0...v1.3.0
 [1.3.0-beta.1]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.2.0...v1.3.0-beta.1
 [1.2.0]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.1.0...v1.2.0
 [1.2.0-beta.2]: https://github.com/andersou/oh-my-openagent-vscode-extension/compare/v1.2.0-beta.1...v1.2.0-beta.2
