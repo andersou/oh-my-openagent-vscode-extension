@@ -2,7 +2,7 @@
   "name": "oh-my-openagent-vscode",
   "displayName": "Oh My OpenAgent",
   "description": "Manage and override Oh My OpenAgent models, agents, and categories from VS Code.",
-  "version": "1.3.0-beta.1",
+  "version": "1.3.0",
   "private": true,
   "license": "MIT",
   "publisher": "andersou",
